@@ -20,6 +20,8 @@
 	    category-remove-object
 	    category-add-morphism
 	    category-remove-morphism
+            category-has-object?
+            category-has-morphism?
 
 	    make-arrow
 	    arrow?
@@ -27,23 +29,15 @@
 	    arrow-dom
 	    arrow-cod
 	    arrow-fn
-	    show-arrow
-	    arrow-equal?
 	    ))
 
 (define-record-type arrow
-  (make-arrow id dom cod fn queue)
+  (make-arrow id dom cod fn)
   arrow?
   (id arrow-id)
   (dom arrow-dom)
   (cod arrow-cod)
-  (fn arrow-fn)
-  (queue arrow-queue))
-
-(define (arrow-equal? a1 a2)
-  (and (equal? (arrow-id a1) (arrow-id a2))
-       (equal? (arrow-dom a1) (arrow-dom a2))
-       (equal? (arrow-cod a1) (arrow-cod a2))))
+  (fn arrow-fn))
 
 (define-record-type category
   (make-category-record dom-fn cod-fn compose-fn id-fn equal-fn mor-id-fn objects-h morphisms-h)
@@ -62,6 +56,12 @@
 (define (category-morphisms cat)
   (hash-map->list (lambda (k v) v) (_category-morphisms-h cat)))
 
+(define (category-has-object? cat obj)
+  (hash-ref (_category-objects-h cat) obj #f))
+
+(define (category-has-morphism? cat m)
+  (hash-ref (_category-morphisms-h cat) ((category-mor-id-fn cat) m) #f))
+
 (define (make-category dom-fn cod-fn compose-fn id-fn equal-fn mor-id-fn obj-list mor-list)
   (let ((objs (make-hash-table))
         (mors (make-hash-table)))
@@ -70,14 +70,11 @@
     (make-category-record dom-fn cod-fn compose-fn id-fn equal-fn mor-id-fn objs mors)))
 
 (define (category-add-object cat obj)
-  (let ((objs (_category-objects-h cat))
-        (morphs (_category-morphisms-h cat))
-        (mor-id-fn (category-mor-id-fn cat))
-        (id-arrow ((category-id-fn cat) obj)))
-    (unless (hash-ref objs obj #f)
-      (hash-set! objs obj #t))
-    (unless (hash-ref morphs (mor-id-fn id-arrow) #f)
-      (hash-set! morphs (mor-id-fn id-arrow) id-arrow))
+  (let ((id-arrow ((category-id-fn cat) obj)))
+    (unless (category-has-object? cat obj)
+      (hash-set! (_category-objects-h cat) obj #t))
+    (unless (category-has-morphism? cat id-arrow)
+      (category-add-morphism cat id-arrow))
     cat))
 
 (define (category-remove-object cat obj)
@@ -95,11 +92,9 @@
     cat))
 
 (define (category-add-morphism cat arrow)
-  (let ((morphs (_category-morphisms-h cat))
-        (mor-id-fn (category-mor-id-fn cat)))
-    (unless (hash-ref morphs (mor-id-fn arrow) #f)
-      (hash-set! morphs (mor-id-fn arrow) arrow))
-    cat))
+  (unless (category-has-morphism? cat arrow)
+    (hash-set! (_category-morphisms-h cat) (arrow-id arrow) arrow))
+  cat)
 
 (define (category-remove-morphism cat arrow)
   (let ((morphs (_category-morphisms-h cat))
@@ -160,5 +155,3 @@
        all-arrows))
     #t))
 
-(define (show-arrow a)
-  (format #f "~a->~a" (arrow-dom a) (arrow-cod a)))

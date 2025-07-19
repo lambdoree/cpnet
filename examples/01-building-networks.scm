@@ -1,4 +1,12 @@
-(use-modules (srfi srfi-1) (cpnet category) (cpnet cpnet))
+(use-modules (srfi srfi-1) (cpnet cpnet) (cpnet runtime))
+
+(define (approx-equal? a b tolerance)
+  (and (number? a) (number? b) (< (abs (- a b)) tolerance)))
+
+(define (safe-div x y)
+  (if (zero? y)
+      0
+      (/ x y)))
 
 (define A (make-cell 'A #f))
 (define B (make-cell 'B #f))
@@ -8,23 +16,18 @@
 (define q (make-propagator 'q B C (lambda (y) (cons (* y 2) '()))))
 
 (define Net1
-  (make-category
-   propagator-src propagator-tgt
-   (lambda (g f) (propagator-compose g f))
-   propagator-id-fn
-   propagator-equal?
-   propagator-id
+  (make-cpnet-category
    (list A B C)
    (list p q)))
 
 (category-validate Net1)
-(show-cpnet-state Net1 "Initial Net1 (all nil)")
+(runtime-show-state Net1 "Initial Net1 (all nil)")
 
 (cell-set-value! A 3)
-(show-cpnet-state Net1 "Set A=3")
-(execute-effects (cpnet-settle! Net1))
-(show-cpnet-state Net1 "After settling")
-
+(runtime-show-state Net1 "Set A=3")
+(runtime-execute-effects (runtime-settle! Net1))
+(runtime-show-state Net1 "After settling")
+(if (and (number? (cell-value C)) (= (cell-value C) 8)) (display "success\n"))
 
 (define X (make-cell 'X #f))
 (define Y (make-cell 'Y #f))
@@ -33,23 +36,25 @@
 (define NetABC
   (make-cpnet-category
    (list X Y Z)
-   (make-adder-constraint X Y Z)))
+   (make-binary-constraint X Y Z + - - "adder")))
 
-(show-cpnet-state NetABC "Initial NetABC (all nil)")
+(runtime-show-state NetABC "Initial NetABC (all nil)")
 
 (cell-set-value! X 5)
 (cell-set-value! Y 2)
-(show-cpnet-state NetABC "Set X=5, Y=2")
-(execute-effects (cpnet-settle! NetABC))
-(show-cpnet-state NetABC "After settling (Z should be 7)")
+(runtime-show-state NetABC "Set X=5, Y=2")
+(runtime-execute-effects (runtime-settle! NetABC))
+(runtime-show-state NetABC "After settling (Z should be 7)")
+(if (and (number? (cell-value Z)) (= (cell-value Z) 7)) (display "success\n"))
 
 (cell-set-value! X #f) (cell-set-value! Y #f) (cell-set-value! Z #f)
 
 (cell-set-value! X 3)
 (cell-set-value! Z 10)
-(show-cpnet-state NetABC "Set X=3, Z=10")
-(execute-effects (cpnet-settle! NetABC))
-(show-cpnet-state NetABC "After settling (Y should be 7)")
+(runtime-show-state NetABC "Set X=3, Z=10")
+(runtime-execute-effects (runtime-settle! NetABC))
+(runtime-show-state NetABC "After settling (Y should be 7)")
+(if (and (number? (cell-value Y)) (= (cell-value Y) 7)) (display "success\n"))
 
 (define M1 (make-cell 'M1 #f))
 (define M2 (make-cell 'M2 #f))
@@ -58,59 +63,76 @@
 (define NetMul
   (make-cpnet-category
    (list M1 M2 M3)
-   (make-multiplier-constraint M1 M2 M3)))
+   (make-binary-constraint M1 M2 M3 * safe-div safe-div "multiplier")))
 
-(show-cpnet-state NetMul "Initial Multiplier Net (all nil)")
+(runtime-show-state NetMul "Initial Multiplier Net (all nil)")
 
 (cell-set-value! M1 3)
 (cell-set-value! M2 5)
-(show-cpnet-state NetMul "Set M1=3, M2=5")
-(execute-effects (cpnet-settle! NetMul))
-(show-cpnet-state NetMul "After settling (M3 should be 15)")
+(runtime-show-state NetMul "Set M1=3, M2=5")
+(runtime-execute-effects (runtime-settle! NetMul))
+(runtime-show-state NetMul "After settling (M3 should be 15)")
+(if (and (number? (cell-value M3)) (= (cell-value M3) 15)) (display "success\n"))
 
 (cell-set-value! M1 #f) (cell-set-value! M2 #f) (cell-set-value! M3 #f)
 
 (cell-set-value! M2 4)
 (cell-set-value! M3 20)
-(show-cpnet-state NetMul "Set M2=4, M3=20")
-(execute-effects (cpnet-settle! NetMul))
-(show-cpnet-state NetMul "After settling (M1 should be 5)")
+(runtime-show-state NetMul "Set M2=4, M3=20")
+(runtime-execute-effects (runtime-settle! NetMul))
+(runtime-show-state NetMul "After settling (M1 should be 5)")
+(if (and (number? (cell-value M1)) (= (cell-value M1) 5)) (display "success\n"))
 
 (define C* (make-cell 'Celsius    #f))
 (define F* (make-cell 'Fahrenheit #f))
 (define K* (make-cell 'Kelvin     #f))
 
 (define props
-  (list
-   (make-propagator 'c->f C* F* (lambda (c) (cons (+ (* c 9/5) 32) '())))
-   (make-propagator 'f->c F* C* (lambda (f) (cons (* (- f 32) 5/9) '())))
-   (make-propagator 'c->k C* K* (lambda (c) (cons (+ c 273.15) '())))
-   (make-propagator 'k->c K* C* (lambda (k) (cons (- k 273.15) '())))
-   (make-propagator 'f->k F* K* (lambda (f) (cons (+ (* (- f 32) 5/9) 273.15) '())))
-   (make-propagator 'k->f K* F* (lambda (k) (cons (+ (* (- k 273.15) 9/5) 32) '())))))
+  (append
+   (make-unary-constraint C* F*
+			  (lambda (c) (+ (* c 9/5) 32))
+			  (lambda (f) (* (- f 32) 5/9))
+			  "celsius-fahrenheit")
+   (make-unary-constraint C* K*
+			  (lambda (c) (+ c 273.15))
+			  (lambda (k) (- k 273.15))
+			  "celsius-kelvin")
+   (make-unary-constraint F* K*
+			  (lambda (f) (+ (* (- f 32) 5/9) 273.15))
+			  (lambda (k) (+ (* (- k 273.15) 9/5) 32))
+			  "fahrenheit-kelvin")))
 
 (define NetTemp (make-cpnet-category (list C* F* K*) props))
 
-(show-cpnet-state NetTemp "Initial Temperature Net (all nil)")
+(runtime-show-state NetTemp "Initial Temperature Net (all nil)")
 
 (cell-set-value! C* 100)
-(show-cpnet-state NetTemp "Set Celsius to 100")
-(execute-effects (cpnet-settle! NetTemp))
-(show-cpnet-state NetTemp "After settling (F=212, K=373.15)")
+(runtime-show-state NetTemp "Set Celsius to 100")
+(runtime-execute-effects (runtime-settle! NetTemp))
+(runtime-show-state NetTemp "After settling (F=212, K=373.15)")
+(if (and (approx-equal? (cell-value F*) 212 0.001)
+         (approx-equal? (cell-value K*) 373.15 0.001))
+    (display "success\n"))
 
 (cell-set-value! C* #f) (cell-set-value! F* #f) (cell-set-value! K* #f)
 
 (cell-set-value! F* 32)
-(show-cpnet-state NetTemp "Set Fahrenheit to 32")
-(execute-effects (cpnet-settle! NetTemp))
-(show-cpnet-state NetTemp "After settling (C=0, K=273.15)")
+(runtime-show-state NetTemp "Set Fahrenheit to 32")
+(runtime-execute-effects (runtime-settle! NetTemp))
+(runtime-show-state NetTemp "After settling (C=0, K=273.15)")
+(if (and (approx-equal? (cell-value C*) 0 0.001)
+         (approx-equal? (cell-value K*) 273.15 0.001))
+    (display "success\n"))
 
 (cell-set-value! C* #f) (cell-set-value! F* #f) (cell-set-value! K* #f)
 
 (cell-set-value! K* 0)
-(show-cpnet-state NetTemp "Set Kelvin to 0")
-(execute-effects (cpnet-settle! NetTemp))
-(show-cpnet-state NetTemp "After settling (C=-273.15, F=-459.67)")
+(runtime-show-state NetTemp "Set Kelvin to 0")
+(runtime-execute-effects (runtime-settle! NetTemp))
+(runtime-show-state NetTemp "After settling (C=-273.15, F=-459.67)")
+(if (and (approx-equal? (cell-value C*) -273.15 0.001)
+         (approx-equal? (cell-value F*) -459.67 0.001))
+    (display "success\n"))
 
 (define CS1 (make-cell 'ConflictSource1 #f))
 (define CS2 (make-cell 'ConflictSource2 #f))
@@ -132,13 +154,14 @@
    (list CS1 CS2 CT)
    (list p-add p-mul)))
 
-(show-cpnet-state NetConflict "Initial Conflict Net")
+(runtime-show-state NetConflict "Initial Conflict Net")
 
 (cell-set-value! CS1 5)
 (cell-set-value! CS2 20)
-(show-cpnet-state NetConflict "Set CS1=5, CS2=20")
-(execute-effects (cpnet-settle! NetConflict))
-(show-cpnet-state NetConflict "After settling (result is deterministic: 27.5)")
+(runtime-show-state NetConflict "Set CS1=5, CS2=20")
+(runtime-execute-effects (runtime-settle! NetConflict))
+(runtime-show-state NetConflict "After settling (result is deterministic: 27.5)")
+(if (approx-equal? (cell-value CT) 27.5 0.001) (display "success\n"))
 
 (define (ttt-display-board cells)
   (let ((vals (map (lambda (c) (let ((v (cell-value c))) (if (eq? v #f) "." (symbol->string v)))) cells)))
@@ -209,12 +232,12 @@
       (begin
         (display (format #f "\n--- Player ~a moves to ~a ---\n" player (cell-id cell)))
         (cell-set-value! cell player)
-        (execute-effects (cpnet-settle! net))
+        (runtime-execute-effects (runtime-settle! net))
         (display (ttt-display-board ttt-cells))
         (display (format #f "Game status: ~a\n" (cell-value game-status))))))
 
 (display "\n\n--- TIC-TAC-TOE GAME SIMULATION ---\n")
-(show-cpnet-state NetTTT "Initial Tic-Tac-Toe Net")
+(runtime-show-state NetTTT "Initial Tic-Tac-Toe Net")
 (display (ttt-display-board ttt-cells))
 
 (play-move NetTTT (list-ref ttt-cells 4) 'X)
@@ -224,4 +247,5 @@
 (play-move NetTTT (list-ref ttt-cells 8) 'X)
 (play-move NetTTT (list-ref ttt-cells 1) 'O)
 (play-move NetTTT (list-ref ttt-cells 5) 'X)
+(if (eq? (cell-value game-status) 'X-wins) (display "success\n"))
 (play-move NetTTT (list-ref ttt-cells 3) 'O)
