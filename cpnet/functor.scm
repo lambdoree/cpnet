@@ -11,13 +11,13 @@
             functor-validate
             compose-functor))
 
-(define-record-type functor
-  (make-functor-record source-cat target-cat object-map morphism-map)
+(define-record-type <functor>
+  (make-functor-record source target object-map morphism-map)
   functor?
-  (source-cat       functor-source)
-  (target-cat       functor-target)
-  (object-map       functor-object-map)
-  (morphism-map     functor-morphism-map))
+  (source       functor-source)
+  (target       functor-target)
+  (object-map   functor-object-map)
+  (morphism-map functor-morphism-map))
 
 (define (make-functor C D F0 F1)
   (unless (and (cat:category? C)

@@ -10,7 +10,7 @@ all: build
 
 build:
 	@echo "Compiling all cpnet modules..."
-	guile -L . -c '(use-modules (cpnet cpnet) (cpnet runtime))'
+	guile -L . -c '(use-modules (cpnet category) (cpnet core) (cpnet functor) (cpnet nt) (cpnet runtime))'
 
 install: build
 	@echo "Installing only .scm files to $(DESTDIR)$(GUILE_SITEDIR)/$(PROJECT)"
@@ -23,5 +23,6 @@ uninstall:
 	rm -rf $(DESTDIR)$(GUILE_SITEDIR)/$(PROJECT)
 
 clean:
-	@echo "Cleaning compiled files"
+	@echo "Cleaning compiled files and cache"
 	rm -f $(SRC_DIR)/*.go
+	-rm -rf $(HOME)/.cache/guile/ccache

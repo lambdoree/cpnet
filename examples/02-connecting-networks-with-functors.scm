@@ -1,4 +1,8 @@
-(use-modules (srfi srfi-1) (cpnet cpnet) (cpnet runtime))
+(use-modules (srfi srfi-1)
+             (cpnet category)
+             (cpnet core)
+             (cpnet functor)
+             (cpnet runtime))
 
 (define A1 (make-cell 'A1 #f))
 (define B1 (make-cell 'B1 #f))

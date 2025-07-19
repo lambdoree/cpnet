@@ -10,12 +10,12 @@
             natural-transformation-component
             natural-transformation-validate))
 
-(define-record-type natural-transformation
-  (make-natural-transformation-record source-functor target-functor component)
+(define-record-type <natural-transformation>
+  (make-natural-transformation-record source target component)
   natural-transformation?
-  (source-functor   natural-transformation-source)
-  (target-functor   natural-transformation-target)
-  (component        natural-transformation-component))
+  (source    natural-transformation-source)
+  (target    natural-transformation-target)
+  (component natural-transformation-component))
 
 (define (make-natural-transformation F G comp)
   (unless (and (fun:functor? F)

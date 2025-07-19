@@ -31,25 +31,25 @@
 	    arrow-fn
 	    ))
 
-(define-record-type arrow
+(define-record-type <category>
+  (make-category-record dom-fn cod-fn compose-fn id-fn equal-fn mor-id-fn objs mors)
+  category?
+  (dom-fn category-dom-fn)
+  (cod-fn category-cod-fn)
+  (compose-fn category-compose-fn)
+  (id-fn category-id-fn)
+  (equal-fn category-equal-fn)
+  (mor-id-fn category-mor-id-fn)
+  (objs _category-objects-h)
+  (mors _category-morphisms-h))
+
+(define-record-type <arrow>
   (make-arrow id dom cod fn)
   arrow?
   (id arrow-id)
   (dom arrow-dom)
   (cod arrow-cod)
   (fn arrow-fn))
-
-(define-record-type category
-  (make-category-record dom-fn cod-fn compose-fn id-fn equal-fn mor-id-fn objects-h morphisms-h)
-  category?
-  (dom-fn      category-dom-fn)
-  (cod-fn      category-cod-fn)
-  (compose-fn  category-compose-fn)
-  (id-fn       category-id-fn)
-  (equal-fn    category-equal-fn)
-  (mor-id-fn   category-mor-id-fn)
-  (objects-h   _category-objects-h)
-  (morphisms-h _category-morphisms-h))
 
 (define (category-objects cat)
   (hash-map->list (lambda (k v) k) (_category-objects-h cat)))

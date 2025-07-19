@@ -1,4 +1,7 @@
-(use-modules (srfi srfi-1) (cpnet cpnet) (cpnet runtime))
+(use-modules (srfi srfi-1)
+             (cpnet category)
+             (cpnet core)
+             (cpnet runtime))
 
 (define (approx-equal? a b tolerance)
   (and (number? a) (number? b) (< (abs (- a b)) tolerance)))
