@@ -1,28 +1,36 @@
 (define-module (cpnet runtime)
   #:use-module (srfi srfi-1)
   #:use-module (ice-9 hash-table)
-  #:use-module (cpnet cpnet)
-  #:export (runtime-settle!
-            runtime-execute-effects
-            runtime-show-state))
+  #:use-module ((cpnet cpnet) :prefix cpnet:)
+  #:export (
+	    cpnet-runtime-settle!
+	    cpnet-runtime-execute-effects
+	    cpnet-runtime-show-state))
 
-(define (runtime-execute-effects effects)
+(define (cpnet-runtime-execute-effects effects)
   (for-each
    (lambda (effect)
-     (case (effect-type effect)
-       ('display (display (effect-payload effect)))
-       (else (format #t "Unknown effect: ~a\n" (effect-type effect)))))
+     (case (cpnet:effect-type effect)
+       ('display (display (cpnet:effect-payload effect)))
+       (else (format #t "Unknown effect: ~a\n" (cpnet:effect-type effect)))))
    effects))
 
-(define (runtime-show-state C title)
+(define (cpnet-runtime-show-state C title)
   (display (format #f "\n--- [~a] cpnet state ---\n" title))
   (for-each
    (lambda (c)
-     (display (format #f "Cell ~a: ~a\n" (cell-id c) (cell-value c))))
-   (sort (category-objects C) (lambda (a b) (string<? (symbol->string (cell-id a)) (symbol->string (cell-id b))))))
+     (display (format #f "Cell ~a: ~a\n"
+                      (cpnet:cell-id c)
+                      (cpnet:cell-value c))))
+   (sort (cpnet:category-objects C)
+         (lambda (a b)
+           (string<?
+             (symbol->string (cpnet:cell-id a))
+             (symbol->string (cpnet:cell-id b))))))
   (display "--------------------------------\n"))
 
-(define (runtime-settle! C)
+;; wrappers for public cpnet runtime interface
+(define (cpnet-runtime-settle! C)
   (let loop ((made-change? #t) (iter 0) (all-effects '()))
     (if (not made-change?)
         (reverse all-effects)
@@ -36,15 +44,16 @@
 
               (for-each
                (lambda (m)
-                 (let* ((src (arrow-dom m))
-                        (tgt (arrow-cod m))
-                        (src-val (cell-value src)))
-                   (when (and (not (eq? src-val #f)) (eq? (cell-value tgt) #f))
-                     (let ((result ((arrow-fn m) src-val)))
+                 (let* ((src (cpnet:arrow-dom m))
+                        (tgt (cpnet:arrow-cod m))
+                        (src-val (cpnet:cell-value src)))
+                   (when (and (not (eq? src-val #f))
+                              (eq? (cpnet:cell-value tgt) #f))
+                     (let ((result ((cpnet:arrow-fn m) src-val)))
                        (when (not (eq? (car result) #f))
                          (let ((current (hash-ref potential-updates tgt '())))
                            (hash-set! potential-updates tgt (cons result current))))))))
-               (category-morphisms C))
+               (cpnet:category-morphisms C))
 
               (hash-for-each
                (lambda (cell updates)

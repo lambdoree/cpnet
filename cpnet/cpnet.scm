@@ -5,31 +5,67 @@
   #:use-module ((cpnet category) :prefix category:)
   #:use-module ((cpnet functor) :prefix functor:)
   #:use-module ((cpnet nt) :prefix nt:)
-  #:export (;; From category.scm
-            category? make-category category-validate
-		      category-objects category-morphisms category-compose
-		      category-add-object category-remove-object
-		      category-add-morphism category-remove-morphism
-		      category-has-object? category-has-morphism?
-		      category-dom-fn category-cod-fn category-compose-fn
-		      category-equal-fn category-id-fn
-		      arrow? make-arrow arrow-id arrow-dom arrow-cod arrow-fn
-		      ;; From functor.scm
-		      functor? make-functor functor-validate compose-functor
-		      functor-source functor-target
-		      functor-object-map functor-morphism-map
-		      ;; From nt.scm
-		      natural-transformation? make-natural-transformation
-		      natural-transformation-validate
-		      natural-transformation-source natural-transformation-target
-		      natural-transformation-component
-		      ;; From this module
-		      cell? make-cell cell-id cell-value cell-set-value! cell-merge-fn
-		      effect? make-effect effect-type effect-payload
-		      propagator? make-propagator propagator-id propagator-src
-		      propagator-tgt propagator-fn propagator-equal? propagator-compose
-		      propagator-id-fn make-cpnet-category make-unary-constraint
-		      make-binary-constraint make-cpnet-functor)
+  #:export (
+    cpnet-category?
+    cpnet-make-category
+    cpnet-category-validate
+    cpnet-category-objects
+    cpnet-category-morphisms
+    cpnet-category-compose
+    cpnet-category-add-object
+    cpnet-category-remove-object
+    cpnet-category-add-morphism
+    cpnet-category-remove-morphism
+    cpnet-category-has-object?
+    cpnet-category-has-morphism?
+    cpnet-category-dom-fn
+    cpnet-category-cod-fn
+    cpnet-category-compose-fn
+    cpnet-category-equal-fn
+    cpnet-category-id-fn
+    cpnet-arrow?
+    cpnet-make-arrow
+    cpnet-arrow-id
+    cpnet-arrow-dom
+    cpnet-arrow-cod
+    cpnet-arrow-fn
+    cpnet-functor?
+    cpnet-make-functor
+    cpnet-functor-validate
+    cpnet-compose-functor
+    cpnet-functor-source
+    cpnet-functor-target
+    cpnet-functor-object-map
+    cpnet-functor-morphism-map
+    cpnet-natural-transformation?
+    cpnet-make-natural-transformation
+    cpnet-natural-transformation-validate
+    cpnet-natural-transformation-source
+    cpnet-natural-transformation-target
+    cpnet-natural-transformation-component
+    cpnet-cell?
+    cpnet-make-cell
+    cpnet-cell-id
+    cpnet-cell-value
+    cpnet-cell-set-value!
+    cpnet-cell-merge-fn
+    cpnet-effect?
+    cpnet-make-effect
+    cpnet-effect-type
+    cpnet-effect-payload
+    cpnet-propagator?
+    cpnet-make-propagator
+    cpnet-propagator-id
+    cpnet-propagator-src
+    cpnet-propagator-tgt
+    cpnet-propagator-fn
+    cpnet-propagator-equal?
+    cpnet-propagator-compose
+    cpnet-propagator-id-fn
+    cpnet-make-cpnet-category
+    cpnet-make-unary-constraint
+    cpnet-make-binary-constraint
+    cpnet-make-cpnet-functor)
   )
 
 (define category? category:category?)
@@ -69,6 +105,68 @@
 (define natural-transformation-source nt:natural-transformation-source)
 (define natural-transformation-target nt:natural-transformation-target)
 (define natural-transformation-component nt:natural-transformation-component)
+
+;; wrappers for public cpnet interface
+(define cpnet-category? category?)
+(define cpnet-make-category make-category)
+(define cpnet-category-validate category-validate)
+(define cpnet-category-objects category-objects)
+(define cpnet-category-morphisms category-morphisms)
+(define cpnet-category-compose category-compose)
+(define cpnet-category-add-object category-add-object)
+(define cpnet-category-remove-object category-remove-object)
+(define cpnet-category-add-morphism category-add-morphism)
+(define cpnet-category-remove-morphism category-remove-morphism)
+(define cpnet-category-has-object? category-has-object?)
+(define cpnet-category-has-morphism? category-has-morphism?)
+(define cpnet-category-dom-fn category-dom-fn)
+(define cpnet-category-cod-fn category-cod-fn)
+(define cpnet-category-compose-fn category-compose-fn)
+(define cpnet-category-equal-fn category-equal-fn)
+(define cpnet-category-id-fn category-id-fn)
+(define cpnet-arrow? arrow?)
+(define cpnet-make-arrow make-arrow)
+(define cpnet-arrow-id arrow-id)
+(define cpnet-arrow-dom arrow-dom)
+(define cpnet-arrow-cod arrow-cod)
+(define cpnet-arrow-fn arrow-fn)
+(define cpnet-functor? functor?)
+(define cpnet-make-functor make-functor)
+(define cpnet-functor-validate functor-validate)
+(define cpnet-compose-functor compose-functor)
+(define cpnet-functor-source functor-source)
+(define cpnet-functor-target functor-target)
+(define cpnet-functor-object-map functor-object-map)
+(define cpnet-functor-morphism-map functor-morphism-map)
+(define cpnet-natural-transformation? natural-transformation?)
+(define cpnet-make-natural-transformation make-natural-transformation)
+(define cpnet-natural-transformation-validate natural-transformation-validate)
+(define cpnet-natural-transformation-source natural-transformation-source)
+(define cpnet-natural-transformation-target natural-transformation-target)
+(define cpnet-natural-transformation-component natural-transformation-component)
+(define cpnet-cell? cell?)
+(define cpnet-make-cell make-cell)
+(define cpnet-cell-id cell-id)
+(define cpnet-cell-value cell-value)
+(define cpnet-cell-set-value! cell-set-value!)
+(define cpnet-cell-merge-fn cell-merge-fn)
+(define cpnet-effect? effect?)
+(define cpnet-make-effect make-effect)
+(define cpnet-effect-type effect-type)
+(define cpnet-effect-payload effect-payload)
+(define cpnet-propagator? propagator?)
+(define cpnet-make-propagator make-propagator)
+(define cpnet-propagator-id propagator-id)
+(define cpnet-propagator-src propagator-src)
+(define cpnet-propagator-tgt propagator-tgt)
+(define cpnet-propagator-fn propagator-fn)
+(define cpnet-propagator-equal? propagator-equal?)
+(define cpnet-propagator-compose propagator-compose)
+(define cpnet-propagator-id-fn propagator-id-fn)
+(define cpnet-make-cpnet-category make-cpnet-category)
+(define cpnet-make-unary-constraint make-unary-constraint)
+(define cpnet-make-binary-constraint make-binary-constraint)
+(define cpnet-make-cpnet-functor make-cpnet-functor)
 
 (define propagator? arrow?)
 (define propagator-id arrow-id)

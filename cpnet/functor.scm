@@ -1,7 +1,7 @@
 (define-module (cpnet functor)
   #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-9)
-  #:use-module (cpnet category)
+  #:use-module ((cpnet category) :prefix cat:)
   #:export (make-functor
             functor?
             functor-source
@@ -20,8 +20,8 @@
   (morphism-map     functor-morphism-map))
 
 (define (make-functor C D F0 F1)
-  (unless (and (category? C)
-               (category? D)
+  (unless (and (cat:category? C)
+               (cat:category? D)
                (procedure? F0)
                (procedure? F1))
     (error 'make-functor
@@ -33,12 +33,12 @@
    (λ (f)
      (append-map
       (λ (g)
-        (if (equal? ((category-cod-fn C) f)
-                    ((category-dom-fn C) g))
+        (if (equal? ((cat:category-cod-fn C) f)
+                    ((cat:category-dom-fn C) g))
             (list (cons f g))
             '()))
-      (category-morphisms C)))
-   (category-morphisms C)))
+      (cat:category-morphisms C)))
+   (cat:category-morphisms C)))
 
 (define (functor-validate F)
   (unless (functor? F)
@@ -47,13 +47,13 @@
          (D      (functor-target       F))
          (F0     (functor-object-map   F))
          (F1     (functor-morphism-map F))
-         (domC   (category-dom-fn      C))
-         (codC   (category-cod-fn      C))
-         (compC  (category-compose-fn  C))
-         (idC     (lambda (x) ((category-id-fn C) x)))
-         (compD  (category-compose-fn  D))
-         (idD     (lambda (x) ((category-id-fn D) x)))
-	 (eqD     (category-equal-fn D)))
+         (domC   (cat:category-dom-fn      C))
+         (codC   (cat:category-cod-fn      C))
+         (compC  (cat:category-compose-fn  C))
+         (idC     (lambda (x) ((cat:category-id-fn C) x)))
+         (compD  (cat:category-compose-fn  D))
+         (idD     (lambda (x) ((cat:category-id-fn D) x)))
+	 (eqD     (cat:category-equal-fn D)))
     (for-each
      (lambda (pair)
        (let* ((f   (car pair))
@@ -71,7 +71,7 @@
 	 (unless (eqD lhs rhs)
            (error 'functor-validate
                   (format #f "Identity law violated at ~a" x)))))
-     (category-objects C))
+     (cat:category-objects C))
     #t))
 
 (define (compose-functor G F)

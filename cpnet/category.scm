@@ -117,7 +117,6 @@
                 (comp-fn g f)))
         (error "category-compose: cod(f) is not equal to dom(g)" f g))))
 
-
 (define (category-validate cat)
   (let* ((dom       (category-dom-fn cat))
          (cod       (category-cod-fn cat))
