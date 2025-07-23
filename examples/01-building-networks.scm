@@ -15,8 +15,8 @@
 (define B (make-cell 'B #f))
 (define C (make-cell 'C #f))
 
-(define p (make-propagator 'p A B (lambda (x) (cons (+ x 1) '()))))
-(define q (make-propagator 'q B C (lambda (y) (cons (* y 2) '()))))
+(define p (make-propagator 'p A B (lambda (x _) (cons (+ x 1) '()))))
+(define q (make-propagator 'q B C (lambda (y _) (cons (* y 2) '()))))
 
 (define Net1
   (make-cpnet-category
@@ -149,8 +149,8 @@
 
 (define CT (make-cell 'ConflictTarget #f average-merge))
 
-(define p-add (make-propagator 'p-add CS1 CT (lambda (v) (cons (+ v 10) '()))))
-(define p-mul (make-propagator 'p-mul CS2 CT (lambda (v) (cons (* v 2) '()))))
+(define p-add (make-propagator 'p-add CS1 CT (lambda (v _) (cons (+ v 10) '()))))
+(define p-mul (make-propagator 'p-mul CS2 CT (lambda (v _) (cons (* v 2) '()))))
 
 (define NetConflict
   (make-cpnet-category
@@ -186,7 +186,7 @@
 
 (define (make-line-win-propagators c1 c2 c3 game-status-cell)
   (let ((checker-fn
-         (lambda (_)
+         (lambda (_a _b)
            (let ((v1 (cell-value c1)) (v2 (cell-value c2)) (v3 (cell-value c3)))
              (if (and v1 (eq? v1 v2) (eq? v1 v3))
                  (cons (if (eq? v1 'X) 'X-wins 'O-wins) '())
@@ -202,7 +202,7 @@
           (string->symbol (format #f "draw-check-on-~a" (cell-id board-cell)))
           board-cell
           game-status-cell
-          (lambda (_)
+          (lambda (_a _b)
             (let ((board-full? (every cell-value all-board-cells)))
               (if board-full? (cons 'draw '()) (cons #f '()))))))
        all-board-cells))

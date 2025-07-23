@@ -39,14 +39,17 @@
   (payload effect-payload))
 
 (define (default-merge-fn cell new-vals)
-  (let ((old-val (cell-value cell))
-        (first-val (car new-vals)))
-    (if (every (lambda (v) (equal? v first-val)) (cdr new-vals))
-        (cons first-val '())
-        (cons old-val
-              (list (make-effect 'display
-                                 (format #f "CONFLICT on cell ~a. Values: ~a. Keeping old value ~a.\n"
-                                         (cell-id cell) new-vals old-val)))))))
+  (let* ((old-val (cell-value cell))
+         (filtered-vals (delete old-val new-vals equal?)))
+    (if (null? filtered-vals)
+        (cons old-val '())
+        (let ((unique-new-vals (delete-duplicates filtered-vals equal?)))
+          (if (null? (cdr unique-new-vals))
+              (cons (car unique-new-vals) '())
+              (cons #f
+                    (list (make-effect 'display
+                                       (format #f "CONFLICT on cell ~a. Values: ~a. Reverting to bottom (#f).\n"
+                                               (cell-id cell) new-vals)))))))))
 
 (define (make-cell id init-val . maybe-merge-fn)
   (let ((merge-fn (if (null? maybe-merge-fn)
@@ -64,11 +67,7 @@
 (define propagator? cat:arrow?)
 
 (define (propagator-equal? p q)
-  (or (eq? (cat:arrow-id p) (cat:arrow-id q))
-      (and (eq? (cell-id (cat:arrow-dom p))
-                (cell-id (cat:arrow-dom q)))
-           (eq? (cell-id (cat:arrow-cod p))
-                (cell-id (cat:arrow-cod q))))))
+  (eq? (cat:arrow-id p) (cat:arrow-id q)))
 
 (define (propagator-compose g f)
   (unless (eq? (cat:arrow-cod f) (cat:arrow-dom g))
@@ -78,13 +77,13 @@
                  (symbol->string (cat:arrow-id g))
                  "_o_"
                  (symbol->string (cat:arrow-id f)))))
-         (compose-fn (lambda (x)
-                       (let* ((res-f ((cat:arrow-fn f) x))
+         (compose-fn (lambda (x src-cell)
+                       (let* ((res-f ((cat:arrow-fn f) x src-cell))
                               (val-y (car res-f))
                               (effects-f (cdr res-f)))
                          (if (eq? val-y #f)
                              (cons #f effects-f)
-                             (let* ((res-g ((cat:arrow-fn g) val-y))
+                             (let* ((res-g ((cat:arrow-fn g) val-y (cat:arrow-cod f)))
                                     (val-z (car res-g))
                                     (effects-g (cdr res-g)))
                                (cons val-z (append effects-f effects-g))))))))
@@ -93,7 +92,7 @@
 (define (propagator-id-fn cell)
   (let ((name (string->symbol
                (string-append "id-" (symbol->string (cell-id cell))))))
-    (make-propagator name cell cell (lambda (x) (cons x '())))))
+    (make-propagator name cell cell (lambda (x _) (cons x '())))))
 
 (define (make-cpnet-category objects morphisms)
   (cat:make-category
@@ -110,26 +109,26 @@
     (list
      (make-propagator
       (string->symbol (format #f "p-~a-~a->~a" name id-a id-b)) cell-a cell-b
-      (lambda (a) (cons (fwd a) '())))
+      (lambda (a _) (cons (fwd a) '())))
      (make-propagator
       (string->symbol (format #f "p-~a-~a->~a" name id-b id-a)) cell-b cell-a
-      (lambda (b) (cons (inv b) '()))))))
+      (lambda (b _) (cons (inv b) '()))))))
 
 (define (make-binary-constraint cell-a cell-b cell-c op-c op-a op-b name)
   (let ((id-a (cell-id cell-a)) (id-b (cell-id cell-b)) (id-c (cell-id cell-c)))
     (list
      (make-propagator (string->symbol (format #f "p-~a-~a,~a->~a" name id-a id-b id-c)) cell-a cell-c
-                      (lambda (a) (let ((b (cell-value cell-b))) (if b (cons (op-c a b) '()) (cons #f '())))))
+                      (lambda (a _) (let ((b (cell-value cell-b))) (if b (cons (op-c a b) '()) (cons #f '())))))
      (make-propagator (string->symbol (format #f "p-~a-~a,~a->~a" name id-b id-a id-c)) cell-b cell-c
-                      (lambda (b) (let ((a (cell-value cell-a))) (if a (cons (op-c a b) '()) (cons #f '())))))
+                      (lambda (b _) (let ((a (cell-value cell-a))) (if a (cons (op-c a b) '()) (cons #f '())))))
      (make-propagator (string->symbol (format #f "p-~a-~a,~a->~a" name id-c id-b id-a)) cell-c cell-a
-                      (lambda (c) (let ((b (cell-value cell-b))) (if b (cons (op-a c b) '()) (cons #f '())))))
+                      (lambda (c _) (let ((b (cell-value cell-b))) (if b (cons (op-a c b) '()) (cons #f '())))))
      (make-propagator (string->symbol (format #f "p-~a-~a,~a->~a" name id-b id-c id-a)) cell-b cell-a
-                      (lambda (b) (let ((c (cell-value cell-c))) (if c (cons (op-a c b) '()) (cons #f '())))))
+                      (lambda (b _) (let ((c (cell-value cell-c))) (if c (cons (op-a c b) '()) (cons #f '())))))
      (make-propagator (string->symbol (format #f "p-~a-~a,~a->~a" name id-c id-a id-b)) cell-c cell-b
-                      (lambda (c) (let ((a (cell-value cell-a))) (if a (cons (op-b c a) '()) (cons #f '())))))
+                      (lambda (c _) (let ((a (cell-value cell-a))) (if a (cons (op-b c a) '()) (cons #f '())))))
      (make-propagator (string->symbol (format #f "p-~a-~a,~a->~a" name id-a id-c id-b)) cell-a cell-b
-                      (lambda (a) (let ((c (cell-value cell-c))) (if c (cons (op-b c a) '()) (cons #f '()))))))))
+                      (lambda (a _) (let ((c (cell-value cell-c))) (if c (cons (op-b c a) '()) (cons #f '()))))))))
 
 (define (make-cpnet-functor src-cat tgt-cat cell-map)
   (let* ((F0 (lambda (obj)

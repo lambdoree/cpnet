@@ -1,0 +1,63 @@
+(use-modules (cpnet core)
+             (cpnet runtime)
+             ;; The fully assembled system
+             (examples restaurant dynamic-architecture)
+             ;; Cells needed for simulation
+             (examples restaurant static-architecture)
+             (examples restaurant detail inventory)
+             (examples restaurant detail forecasting))
+
+(display "--- Restaurant Simulation (Multi-file Architecture) ---\n")
+
+(display "\n--- Simulation ---\n")
+(define (sell-dish dish-symbol quantity)
+  (format #t "\n--- Selling ~a of ~a ---\n" quantity dish-symbol)
+  (let ((event `((item . ,dish-symbol) (quantity . ,quantity))))
+    (cell-set-value! sale-event event))
+  (runtime-settle! SystemNet)
+  (let ((forecast (cell-value out-ingredient-forecast)))
+    (when (and forecast (not (null? forecast)))
+      (format #t ">>> FORECAST based on sales history: Need ~a\n" forecast)))
+  (runtime-show-state SystemNet "State after sale"))
+
+(define (add-recipe name ingredients)
+  (format #t "\n--- Adding recipe for ~a ---\n" name)
+  (cell-set-value! new-recipe-event (cons name ingredients))
+  (runtime-settle! SystemNet))
+
+(runtime-show-state SystemNet "Initial State")
+
+(sell-dish 'spaghetti 1)
+(sell-dish 'salad 2)
+
+(add-recipe 'pizza '((dough 1) (cheese 1) (sauce 1)))
+(sell-dish 'pizza 1)
+
+(display "\n--- Selling 40 salads silently to lower stock...\n")
+(do ((i 0 (+ i 1)))
+    ((= i 40))
+  (let ((event '((item . salad) (quantity . 1))))
+    (cell-set-value! sale-event event))
+  (runtime-settle! SystemNet))
+(runtime-show-state SystemNet "State after selling 40 salads")
+
+(display "\n--- Selling one more salad to trigger the alert ---\n")
+(sell-dish 'salad 1)
+
+(display "\nFinal Check:\n")
+(let ((final-pasta (cell-value stock-pasta))
+      (final-sauce (cell-value stock-sauce))
+      (final-lettuce (cell-value stock-lettuce))
+      (final-tomato (cell-value stock-tomato))
+      (final-dough (cell-value stock-dough))
+      (final-cheese (cell-value stock-cheese)))
+  (format #t "Final pasta stock: ~a (Expected: 99)\n" final-pasta)
+  (format #t "Final sauce stock: ~a (Expected: 98)\n" final-sauce)
+  (format #t "Final lettuce stock: ~a (Expected: 7)\n" final-lettuce)
+  (format #t "Final tomato stock: ~a (Expected: 7)\n" final-tomato)
+  (format #t "Final dough stock: ~a (Expected: 49)\n" final-dough)
+  (format #t "Final cheese stock: ~a (Expected: 49)\n" final-cheese)
+  (if (and (= final-pasta 99) (= final-sauce 98)
+           (= final-lettuce 7) (= final-tomato 7)
+           (= final-dough 49) (= final-cheese 49))
+      (display "Success\n")))

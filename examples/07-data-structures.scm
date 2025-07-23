@@ -1,0 +1,38 @@
+(use-modules (cpnet core)
+             (cpnet runtime)
+             (cpnet category)
+             (cpnet lambda))
+
+(display "--- CP-Net Data Structures Demo: Pairs and Lists ---\n")
+
+(define c1 (make-cell 'c1 1))
+(define c2 (make-cell 'c2 2))
+(define c-nil (make-cell 'nil 'nil))
+(define list-part (make-cell 'list-part #f))
+(define full-list (make-cell 'full-list #f))
+(define car-result (make-cell 'car-result #f))
+(define cdr-result (make-cell 'cdr-result #f))
+(define cadr-result (make-cell 'cadr-result #f))
+
+(define build-props (append (p-cons 'cons1 c2 c-nil list-part)
+                            (p-cons 'cons2 c1 list-part full-list)))
+(define decon-props (list (p-car 'car-op full-list car-result)
+                          (p-cdr 'cdr-op full-list cdr-result)
+                          (p-car 'cadr-op cdr-result cadr-result)))
+(define C (make-cpnet-category
+           (list c1 c2 c-nil list-part full-list car-result cdr-result cadr-result)
+           (append build-props decon-props)))
+
+(runtime-settle! C)
+
+(let ((final-list-val (cell-value full-list))
+      (car-val (cell-value car-result))
+      (cadr-val (cell-value cadr-result)))
+  (format #t "Constructed List: ~a\n" final-list-val)
+  (format #t "car(list) -> ~a (Expected: 1)\n" car-val)
+  (format #t "car(cdr(list)) -> ~a (Expected: 2)\n" cadr-val)
+  (if (and (equal? final-list-val '(pair 1 (pair 2 nil)))
+           (equal? car-val 1)
+           (equal? cadr-val 2))
+      (display "Success: List operations are correct.\n")
+      (display "Failure: List operations are incorrect.\n")))

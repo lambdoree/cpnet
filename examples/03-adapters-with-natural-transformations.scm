@@ -11,7 +11,7 @@
 
 (define Input (make-cell 'Input #f))
 (define Output (make-cell 'Output #f))
-(define f (make-propagator 'f Input Output (lambda (x) (cons x '()))))
+(define f (make-propagator 'f Input Output (lambda (x _) (cons x '()))))
 (define C (make-cpnet-category (list Input Output) (list f)))
 (display "Defined an abstract interface C (Input -> Output).\n")
 (cat:category-validate C)
@@ -21,7 +21,7 @@
 (define D (make-cpnet-category (list A B X Y) '()))
 (rt:runtime-show-state D "Target network D with cells A,B,X,Y")
 
-(define pAB (make-propagator 'p_A->B A B (lambda (a) (cons (+ a 10) '()))))
+(define pAB (make-propagator 'p_A->B A B (lambda (a _) (cons (+ a 10) '()))))
 (cat:category-add-morphism D pAB)
 (define F0-F (lambda (obj) (if (eq? (cell-id obj) 'Input) A B)))
 (define F1-F (lambda (morph)
@@ -32,7 +32,7 @@
 (display "\n--- Defined Functor F (implements interface as A->B via '+10') ---\n")
 (functor-validate F)
 
-(define pXY (make-propagator 'p_X->Y X Y (lambda (x) (cons (+ x 10) '()))))
+(define pXY (make-propagator 'p_X->Y X Y (lambda (x _) (cons (+ x 10) '()))))
 (cat:category-add-morphism D pXY)
 (define G0-G (lambda (obj) (if (eq? (cell-id obj) 'Input) X Y)))
 (define G1-G (lambda (morph)
@@ -44,8 +44,8 @@
 (functor-validate G)
 (display "Functors F and G are valid.\n")
 
-(define pAX (make-propagator 'p_A->X A X (lambda (a) (cons a '()))))
-(define pBY (make-propagator 'p_B->Y B Y (lambda (b) (cons b '()))))
+(define pAX (make-propagator 'p_A->X A X (lambda (a _) (cons a '()))))
+(define pBY (make-propagator 'p_B->Y B Y (lambda (b _) (cons b '()))))
 (cat:category-add-morphism D pAX)
 (cat:category-add-morphism D pBY)
 
