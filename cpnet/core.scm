@@ -21,8 +21,9 @@
 	    propagator-compose
 	    propagator-id-fn
 	    make-cpnet-category
-	    make-unary-constraint
-	    make-binary-constraint
+	    p-const
+	    make-connector-propagator
+	    make-fan-out-propagator
 	    make-cpnet-functor))
 
 (define-record-type <cell>
@@ -104,31 +105,30 @@
    objects
    morphisms))
 
-(define (make-unary-constraint cell-a cell-b fwd inv name)
-  (let ((id-a (cell-id cell-a)) (id-b (cell-id cell-b)))
-    (list
-     (make-propagator
-      (string->symbol (format #f "p-~a-~a->~a" name id-a id-b)) cell-a cell-b
-      (lambda (a _) (cons (fwd a) '())))
-     (make-propagator
-      (string->symbol (format #f "p-~a-~a->~a" name id-b id-a)) cell-b cell-a
-      (lambda (b _) (cons (inv b) '()))))))
+(define (p-const id trigger-cell output-cell const-value)
+  (make-propagator id trigger-cell output-cell
+		   (lambda (val src-cell)
+		     (if val
+			 (cons const-value
+			       (list (make-effect 'set-value (cons src-cell #f))))
+			 (cons #f '())))))
 
-(define (make-binary-constraint cell-a cell-b cell-c op-c op-a op-b name)
-  (let ((id-a (cell-id cell-a)) (id-b (cell-id cell-b)) (id-c (cell-id cell-c)))
-    (list
-     (make-propagator (string->symbol (format #f "p-~a-~a,~a->~a" name id-a id-b id-c)) cell-a cell-c
-                      (lambda (a _) (let ((b (cell-value cell-b))) (if b (cons (op-c a b) '()) (cons #f '())))))
-     (make-propagator (string->symbol (format #f "p-~a-~a,~a->~a" name id-b id-a id-c)) cell-b cell-c
-                      (lambda (b _) (let ((a (cell-value cell-a))) (if a (cons (op-c a b) '()) (cons #f '())))))
-     (make-propagator (string->symbol (format #f "p-~a-~a,~a->~a" name id-c id-b id-a)) cell-c cell-a
-                      (lambda (c _) (let ((b (cell-value cell-b))) (if b (cons (op-a c b) '()) (cons #f '())))))
-     (make-propagator (string->symbol (format #f "p-~a-~a,~a->~a" name id-b id-c id-a)) cell-b cell-a
-                      (lambda (b _) (let ((c (cell-value cell-c))) (if c (cons (op-a c b) '()) (cons #f '())))))
-     (make-propagator (string->symbol (format #f "p-~a-~a,~a->~a" name id-c id-a id-b)) cell-c cell-b
-                      (lambda (c _) (let ((a (cell-value cell-a))) (if a (cons (op-b c a) '()) (cons #f '())))))
-     (make-propagator (string->symbol (format #f "p-~a-~a,~a->~a" name id-a id-c id-b)) cell-a cell-b
-                      (lambda (a _) (let ((c (cell-value cell-c))) (if c (cons (op-b c a) '()) (cons #f '()))))))))
+(define (make-connector-propagator id from-cell to-cell)
+  (make-propagator id from-cell to-cell
+    (lambda (v src-cell)
+      (if v
+          (cons v (list (make-effect 'set-value (cons src-cell #f))))
+          (cons #f '())))))
+
+(define (make-fan-out-propagator id from-cell to-cells)
+  (make-propagator id from-cell from-cell
+    (lambda (val src-cell)
+      (if val
+          (let ((effects (map (lambda (to-cell)
+                                (make-effect 'set-value (cons to-cell val)))
+                              to-cells)))
+            (cons #f (append effects (list (make-effect 'set-value (cons src-cell #f))))))
+          (cons #f '())))))
 
 (define (make-cpnet-functor src-cat tgt-cat cell-map)
   (let* ((F0 (lambda (obj)
@@ -145,3 +145,4 @@
                                       (F0 (cat:arrow-cod p))
                                       (cat:arrow-fn p)))))))
     (fun:make-functor src-cat tgt-cat F0 F1)))
+

@@ -1,34 +1,36 @@
 (define-module (cpnet detail)
+  #:use-module (ice-9 hash-table)
   #:use-module (cpnet core)
-  #:use-module (cpnet category)
-  #:export (make-event-propagator
-            make-dispatcher-propagator
-            implement-component))
+  #:use-module (cpnet system)
+  #:export (make-component-factory))
 
-;;; --- event processing propagator ---
+(define (make-component-factory interface-cell-specs private-cell-specs propagator-definer)
+  (lambda (system prefix)
+    (let* ((cell (lambda (name init-val) (make-cell (string->symbol (format #f "~a-~a" prefix name)) init-val)))
+           (prop-id (lambda (name) (string->symbol (format #f "~a-~a" prefix name))))
+           (cells (make-hash-table))
+           (iface-hash (make-hash-table)))
 
-(define (make-event-propagator id src tgt user-fn)
-  (make-propagator id src tgt
-		   (lambda (val src-cell)
-		     (if val
-			 (let ((result (user-fn val)))
-			   (cons (car result)
-				 (cons (make-effect 'set-value (cons src-cell #f))
-				       (cdr result))))
-			 (cons #f '())))))
+      (for-each
+       (lambda (spec)
+         (let* ((name (car spec))
+                (init-val (cadr spec))
+                (new-cell (cell name init-val)))
+           (hash-set! cells name new-cell)
+           (hash-set! iface-hash name new-cell)))
+       interface-cell-specs)
 
+      (for-each
+       (lambda (spec)
+         (let* ((name (car spec))
+                (init-val (cadr spec))
+                (new-cell (cell name init-val)))
+           (hash-set! cells name new-cell)))
+       private-cell-specs)
 
-;;; --- dispatcher propagator ---
+      (system-add-objects system (hash-map->list (lambda (k v) v) cells))
 
-(define (make-dispatcher-propagator id input-cell dispatcher-fn)
-  (make-event-propagator id input-cell input-cell
-			 (lambda (val)
-			   (cons #f (dispatcher-fn val)))))
+      (let ((propagators (propagator-definer cells prop-id)))
+        (system-add-morphisms system propagators))
 
-
-;;; --- implement component ---
-
-(define (implement-component interface-net private-cells propagators)
-  (for-each (lambda (c) (category-add-object interface-net c)) private-cells)
-  (for-each (lambda (p) (category-add-morphism interface-net p)) propagators)
-  interface-net)
+      iface-hash)))
