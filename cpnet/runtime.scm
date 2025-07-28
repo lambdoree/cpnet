@@ -1,6 +1,7 @@
 (define-module (cpnet runtime)
   #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-11)
+  #:use-module (ice-9 hash-table)
   #:use-module ((cpnet core) :prefix core:)
   #:use-module ((cpnet category) :prefix cat:)
   #:use-module (cpnet system)
@@ -35,19 +36,37 @@
     changed?))
 
 (define (runtime-show-state system-or-net title)
-  (let ((C (get-net system-or-net)))
-    (display (format #f "\n--- [~a] cpnet state ---\n" title))
-    (for-each
-     (lambda (c)
-       (display (format #f "Cell ~a: ~a\n"
-                        (core:cell-id c)
-                        (core:cell-value c))))
-     (sort (cat:category-objects C)
-           (lambda (a b)
-             (string<?
-               (symbol->string (core:cell-id a))
-               (symbol->string (core:cell-id b))))))
-    (display "--------------------------------\n")))
+  (display (format #f "\n--- [~a] cpnet state ---\n" title))
+  (if (system? system-or-net)
+      (let* ((cell-tables (system-get-cell-tables system-or-net))
+             (cat-names (sort (hash-map->list (lambda (k v) k) cell-tables)
+                              (lambda (a b) (string<? (symbol->string a) (symbol->string b))))))
+        (for-each
+         (lambda (cat-name)
+           (let* ((table (hash-ref cell-tables cat-name))
+                  (cell-names (sort (hash-map->list (lambda (k v) k) table)
+                                    (lambda (a b) (string<? (symbol->string a) (symbol->string b))))))
+             (for-each
+              (lambda (cell-name)
+                (let ((cell (hash-ref table cell-name)))
+                  (display (format #f "Cell ~a.~a: ~a\n"
+                                   cat-name
+                                   cell-name
+                                   (core:cell-value cell)))))
+              cell-names)))
+         cat-names))
+      (let ((C (get-net system-or-net)))
+        (for-each
+         (lambda (c)
+           (display (format #f "Cell ~a: ~a\n"
+                            (core:cell-id c)
+                            (core:cell-value c))))
+         (sort (cat:category-objects C)
+               (lambda (a b)
+                 (string<?
+                  (symbol->string (core:cell-id a))
+                  (symbol->string (core:cell-id b))))))))
+  (display "--------------------------------\n"))
 
 (define (_runtime-collect-updates C)
   (let ((effects '())

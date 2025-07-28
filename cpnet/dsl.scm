@@ -4,9 +4,10 @@
   #:use-module (cpnet core)
   #:use-module (cpnet system)
   #:use-module (cpnet runtime)
+  #:use-module (cpnet category)
   #:export (category define-cpnet-system compose-systems
-           propagator connector fan-out
-           trigger run show-state))
+		     propagator connector fan-out
+		     trigger run show-state))
 
 (define current-system (make-parameter #f))
 
@@ -17,54 +18,72 @@
 
 (define-syntax propagator
   (lambda (stx)
-    (syntax-case stx ()
-      [(_ pid src tgt fn)
-       (let* ((src-parts (split-sym #'src))
-              (src-cat-sym (car src-parts))
-              (src-cell-sym (cadr src-parts))
-              (src-table-sym (string->symbol (string-append (symbol->string src-cat-sym) "-cells")))
-              (tgt-parts (split-sym #'tgt))
-              (tgt-cat-sym (car tgt-parts))
-              (tgt-cell-sym (cadr tgt-parts))
-              (tgt-table-sym (string->symbol (string-append (symbol->string tgt-cat-sym) "-cells"))))
-         (with-syntax ([src-table (datum->syntax #'src src-table-sym)]
-                       [src-cell-name (datum->syntax #'src src-cell-sym)]
-                       [tgt-table (datum->syntax #'tgt tgt-table-sym)]
-                       [tgt-cell-name (datum->syntax #'tgt tgt-cell-sym)])
-           #'(system-add-morphisms
-              (current-system)
-              (make-propagator
-               'pid
-               (hash-ref src-table 'src-cell-name)
-               (hash-ref tgt-table 'tgt-cell-name)
-               fn))))])))
+    (define (get-cell-access-syntax cell-stx)
+      (syntax-case cell-stx ()
+        [_
+         (let ((parts (split-sym cell-stx)))
+           (if (= (length parts) 3)
+               (let ((sys-name (list-ref parts 0))
+                     (cat-name (list-ref parts 1))
+                     (cell-name (list-ref parts 2)))
+                 (with-syntax ([sys (datum->syntax cell-stx sys-name)]
+                               [cat (datum->syntax cell-stx cat-name)]
+                               [cell (datum->syntax cell-stx cell-name)])
+                   #'(system-find-cell sys 'cat 'cell)))
+               (let* ((cat-name-sym (car parts))
+                      (cell-name-sym (cadr parts))
+                      (table-name-sym (string->symbol
+                                       (string-append (symbol->string cat-name-sym) "-cells"))))
+                 (with-syntax ([table-name (datum->syntax cell-stx table-name-sym)]
+                               [cell-name (datum->syntax cell-stx cell-name-sym)])
+                   #'(hash-ref table-name 'cell-name)))))]))
+    (syntax-case stx (->)
+      [(_ pid src -> tgt fn)
+       (with-syntax ([src-cell (get-cell-access-syntax #'src)]
+                     [tgt-cell (get-cell-access-syntax #'tgt)])
+         #'(system-add-morphisms
+            (current-system)
+            (make-propagator
+             'pid
+             src-cell
+             tgt-cell
+             fn)))])))
 
 (define-syntax connector
   (lambda (stx)
+    (define (get-cell-access-syntax cell-stx)
+      (syntax-case cell-stx ()
+        [_
+         (let ((parts (split-sym cell-stx)))
+           (if (= (length parts) 3)
+               (let ((sys-name (list-ref parts 0))
+                     (cat-name (list-ref parts 1))
+                     (cell-name (list-ref parts 2)))
+                 (with-syntax ([sys (datum->syntax cell-stx sys-name)]
+                               [cat (datum->syntax cell-stx cat-name)]
+                               [cell (datum->syntax cell-stx cell-name)])
+                   #'(system-find-cell sys 'cat 'cell)))
+               (let* ((cat-name-sym (car parts))
+                      (cell-name-sym (cadr parts))
+                      (table-name-sym (string->symbol
+                                       (string-append (symbol->string cat-name-sym) "-cells"))))
+                 (with-syntax ([table-name (datum->syntax cell-stx table-name-sym)]
+                               [cell-name (datum->syntax cell-stx cell-name-sym)])
+                   #'(hash-ref table-name 'cell-name)))))]))
     (syntax-case stx ()
       [(_ pid src tgt)
-       (let* ((src-parts (split-sym #'src))
-              (src-cat-sym (car src-parts))
-              (src-cell-sym (cadr src-parts))
-              (src-table-sym (string->symbol (string-append (symbol->string src-cat-sym) "-cells")))
-              (tgt-parts (split-sym #'tgt))
-              (tgt-cat-sym (car tgt-parts))
-              (tgt-cell-sym (cadr tgt-parts))
-              (tgt-table-sym (string->symbol (string-append (symbol->string tgt-cat-sym) "-cells"))))
-         (with-syntax ([src-table (datum->syntax #'src src-table-sym)]
-                       [src-cell-name (datum->syntax #'src src-cell-sym)]
-                       [tgt-table (datum->syntax #'tgt tgt-table-sym)]
-                       [tgt-cell-name (datum->syntax #'tgt tgt-cell-sym)])
-           #'(system-add-morphisms
-              (current-system)
-              (make-propagator
-               'pid
-               (hash-ref src-table 'src-cell-name)
-               (hash-ref tgt-table 'tgt-cell-name)
-               (lambda (v src-cell)
-                 (if v
-                     (cons v (list (make-effect 'set-value (cons src-cell #f))))
-                     (cons #f '())))))))])))
+       (with-syntax ([src-cell (get-cell-access-syntax #'src)]
+                     [tgt-cell (get-cell-access-syntax #'tgt)])
+         #'(system-add-morphisms
+            (current-system)
+            (make-propagator
+             'pid
+             src-cell
+             tgt-cell
+             (lambda (v source-cell)
+               (if v
+                   (cons v (list (make-effect 'set-value (cons source-cell #f))))
+                   (cons #f '()))))))])))
 
 (define-syntax fan-out
   (lambda (stx)
@@ -88,6 +107,19 @@
 (define-syntax category
   (lambda (stx)
     (syntax-case stx (cells propagators Cell prop ->)
+      [(_ name
+          (cells (Cell id init) ...))
+       (with-syntax ([name-cells (datum->syntax #'name
+                                                (string->symbol
+                                                 (string-append (symbol->string (syntax->datum #'name))
+                                                                "-cells")))])
+         #'(begin
+             (for-each
+              (lambda (c) (system-add-objects (current-system) c))
+              (list (let ((c# (make-cell 'id init)))
+                      (hash-set! name-cells 'id c#)
+                      c#) ...))
+             #t))]
       [(_ name
           (cells (Cell id init) ...)
           (propagators ((prop pid src -> tgt) fn) ...))
@@ -113,6 +145,15 @@
 (define-syntax define-cpnet-system
   (lambda (stx)
     (syntax-case stx (category connections execution)
+      [(_ name (category cat-name . cat-body) ...)
+       #'(define-cpnet-system name
+           (category cat-name . cat-body) ...
+           (connections) (execution))]
+      [(_ name (category cat-name . cat-body) ...
+          (connections con ...))
+       #'(define-cpnet-system name
+           (category cat-name . cat-body) ...
+           (connections con ...) (execution))]
       [(_ name
           (category cat-name . cat-body) ...
           (connections con ...)
@@ -128,39 +169,62 @@
                (let ((new-system (make-system)))
                  (letrec* ((cat-cell-var (make-hash-table)) ...)
                    (parameterize ((current-system new-system))
+                     (for-each
+                      (lambda (pair) (system-add-cell-table new-system (car pair) (cdr pair)))
+                      (list (cons 'cat-name cat-cell-var) ...))
                      (category cat-name . cat-body) ...
                      con ...
-                     (begin step ...)))
+                     step ...))
                  new-system))))])))
 
+(define (merge-system! target-system source-system)
+  (let ((net (system-get-net source-system)))
+    (system-add-objects target-system (category-objects net))
+    (system-add-morphisms target-system (category-morphisms net))
+    (hash-for-each
+     (lambda (cat-name table)
+       (system-add-cell-table target-system cat-name table))
+     (system-get-cell-tables source-system))))
+
 (define-syntax compose-systems
-  (syntax-rules (connections execution)
+  (syntax-rules (systems connections execution)
     [(_ name
-        sys ...
+        (systems sys ...)
         (connections con ...)
         (execution step ...))
      (define name
        (let ((new-system (make-system)))
+         (for-each
+          (lambda (s) (merge-system! new-system s))
+          (list sys ...))
          (parameterize ((current-system new-system))
-           (for-each (lambda (x) #f) (list sys ...))
            con ...
-           (begin step ...))
+           step ...)
          new-system))]))
 
 (define-syntax trigger
   (lambda (stx)
     (syntax-case stx ()
-      [(_ cell val)
-       (let* ((parts (split-sym #'cell))
-              (cat-name-sym (car parts))
-              (cell-name-sym (cadr parts))
-              (table-name-sym (string->symbol
-                               (string-append (symbol->string cat-name-sym)
-                                              "-cells"))))
-         (with-syntax ([table-name (datum->syntax #'cell table-name-sym)]
-                       [cell-name  (datum->syntax #'cell cell-name-sym)])
-           #'(let ((c (hash-ref table-name 'cell-name)))
-               (cell-set-value! c val))))])))
+      [(_ cell-name-stx val)
+       (let ((parts (split-sym #'cell-name-stx)))
+         (if (= (length parts) 3)
+             (let ((sys-name (list-ref parts 0))
+                   (cat-name (list-ref parts 1))
+                   (cell-name (list-ref parts 2)))
+               (with-syntax ([sys (datum->syntax #'cell-name-stx sys-name)]
+                             [cat (datum->syntax #'cell-name-stx cat-name)]
+                             [cell (datum->syntax #'cell-name-stx cell-name)])
+                 #'(let ((c (system-find-cell sys 'cat 'cell)))
+                     (cell-set-value! c val))))
+             (let* ((cat-name-sym (car parts))
+                    (cell-name-sym (cadr parts))
+                    (table-name-sym (string->symbol
+                                     (string-append (symbol->string cat-name-sym)
+                                                    "-cells"))))
+               (with-syntax ([table-name (datum->syntax #'cell-name-stx table-name-sym)]
+                             [cell-name  (datum->syntax #'cell-name-stx cell-name-sym)])
+                 #'(let ((c (hash-ref table-name 'cell-name)))
+                     (cell-set-value! c val))))))])))
 
 (define-syntax-rule (run)
   (runtime-settle! (current-system)))
