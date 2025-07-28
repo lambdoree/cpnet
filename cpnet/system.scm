@@ -24,7 +24,11 @@
 (define (system-add-objects system . objects)
   (let ((net (system-get-net system))
         (obj-list (if (list? (car objects)) (car objects) objects)))
-    (for-each (lambda (obj) (cat:category-add-object net obj)) obj-list)))
+    (for-each (lambda (obj)
+                (when (core:cell? obj)
+                  (core:cell-set-system! obj system))
+                (cat:category-add-object net obj))
+              obj-list)))
 
 (define (system-add-morphisms system . morphisms)
   (let ((net (system-get-net system))

@@ -11,6 +11,8 @@
 	    cell-value
 	    cell-set-value!
 	    cell-merge-fn
+	    cell-system
+	    cell-set-system!
 	    effect?
 	    make-effect
 	    effect-type
@@ -27,11 +29,12 @@
 	    make-cpnet-functor))
 
 (define-record-type <cell>
-  (make-cell-record id value merge-fn)
+  (make-cell-record id value merge-fn system)
   cell?
   (id cell-id)
   (value cell-value set-cell-value!)
-  (merge-fn cell-merge-fn))
+  (merge-fn cell-merge-fn)
+  (system cell-system set-cell-system!))
 
 (define-record-type <effect>
   (make-effect type payload)
@@ -56,10 +59,14 @@
   (let ((merge-fn (if (null? maybe-merge-fn)
                       default-merge-fn
                       (car maybe-merge-fn))))
-    (make-cell-record id init-val merge-fn)))
+    (make-cell-record id init-val merge-fn #f)))
 
 (define (cell-set-value! c new-val)
   (set-cell-value! c new-val)
+  c)
+
+(define (cell-set-system! c new-sys)
+  (set-cell-system! c new-sys)
   c)
 
 (define (make-propagator id src tgt fn)
