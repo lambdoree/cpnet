@@ -16,22 +16,22 @@ CPNET은 범주론(Category Theory)에 수학적 기반을 둔 순수 데이터 
 
 CPNET은 다음과 같은 명확한 계층 구조의 모듈들로 구성됨.
 
-| 모듈 (Module)       | 역할 (Role)                                                                    |
-|---------------------+--------------------------------------------------------------------------------|
-| =cpnet/core=        | *핵심 도구상자 (Core Toolbox)*: Cell, Effect, Propagator 등 시스템을 구성하는 가장 기본적인 요소를 생성하는 순수 함수들을 제공함.                                 |
-| =cpnet/category=    | *수학적 기반 (Mathematical Foundation)*: =core=의 요소들이 따르는 범주론의 수학적 구조(객체, 사상, 항등, 합성 등)를 정의함.                               |
-| =cpnet/system=      | *컨테이너 API (Container API)*: 사용자가 생성한 Cell과 Propagator를 담는 =System= 객체를 생성하고 관리하는 주 사용 API를 제공함.                                 |
-| =cpnet/runtime=     | *실행 엔진 (Execution Engine)*: =System= 객체를 인자로 받아, 네트워크가 안정된 상태(settled state)에 도달할 때까지 전파자를 실행하고 효과를 처리함. |
-| =cpnet/detail=      | *컴포넌트 추상화 (Component Abstraction)*: 여러 셀과 전파자로 구성된 복잡한 컴포넌트를 생성하는 상용구 코드를 추상화하는 =make-component-factory=를 제공함.   |
+| 모듈 (Module)     | 역할 (Role)                                                                                                                                               |
+|-------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| =cpnet/core=        | *핵심 도구상자 (Core Toolbox)*: Cell, Effect, Propagator 등 시스템을 구성하는 가장 기본적인 요소를 생성하는 순수 함수들을 제공함.                           |
+| =cpnet/category=    | *수학적 기반 (Mathematical Foundation)*: =core=의 요소들이 따르는 범주론의 수학적 구조(객체, 사상, 항등, 합성 등)를 정의함.                                 |
+| =cpnet/system=      | *컨테이너 API (Container API)*: 사용자가 생성한 Cell과 Propagator를 담는 =System= 객체를 생성하고 관리하는 주 사용 API를 제공함.                              |
+| =cpnet/runtime=     | *실행 엔진 (Execution Engine)*: =System= 객체를 인자로 받아, 네트워크가 안정된 상태(settled state)에 도달할 때까지 전파자를 실행하고 효과를 처리함.           |
+| =cpnet/detail=      | *컴포넌트 추상화 (Component Abstraction)*: 여러 셀과 전파자로 구성된 복잡한 컴포넌트를 생성하는 상용구 코드를 추상화하는 =make-component-factory=를 제공함. |
 | =cpnet/lib=         | *표준 라이브러리 (Standard Library)*: =apply-gate=와 같이 범용적으로 유용한 컴포넌트들을 제공함.                                                            |
-| =cpnet/pure-lambda= | *람다 계산법 구현체 (Lambda Calculus Implementation)*: SKI 콤비네이터를 사용하여 람다 계산법을 구현한 컴포넌트 라이브러리임.                         |
+| =cpnet/pure-lambda= | *람다 계산법 구현체 (Lambda Calculus Implementation)*: SKI 콤비네이터를 사용하여 람다 계산법을 구현한 컴포넌트 라이브러리임.                                |
 
 * How to Use CPNET
 
 CPNET으로 계산 네트워크를 구축하는 과정은 다음 단계를 따름.
 
-1.  *=make-system=* 으로 시스템 컨테이너를 생성함.
-2.  *=make-cell=* 로 시스템의 상태를 표현할 셀들을 정의함.
+1.  =make-system= 으로 시스템 컨테이너를 생성함.
+2.  =make-cell= 로 시스템의 상태를 표현할 셀들을 정의함.
 3.  재사용 가능한 컴포넌트는 별도의 모듈에서 =make-component-factory= 를 사용하여 정의함. 이 팩토리는 인터페이스/내부 셀의 명세와 전파자를 정의하는 함수를 인자로 받음.
 4.  정의된 팩토리 함수(=make-*-component=)를 호출하여 시스템에 컴포넌트 인스턴스를 추가함.
 5.  *=make-connector-propagator=*, =make-fan-out-propagator= 등과 같은 기본 전파자를 사용하여 컴포넌트의 인터페이스 셀들을 서로 연결함.
