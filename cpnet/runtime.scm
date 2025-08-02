@@ -55,7 +55,7 @@
                                    (core:cell-value cell)))))
               cell-names)))
          cat-names))
-      (let ((C (get-net system-or-net)))
+      (let ((C (system-get-net system-or-net)))
         (for-each
          (lambda (c)
            (display (format #f "Cell ~a: ~a\n"
@@ -104,9 +104,12 @@
 
 (define (runtime-step! system-or-net)
   (let ((C (get-net system-or-net)))
-    (let-values (((potential-updates propagator-effects) (_runtime-collect-updates C))
-                 ((changed-by-merge? merge-effects) (_runtime-apply-updates potential-updates)))
-      (values (append propagator-effects merge-effects)))))
+    (let-values (((potential-updates propagator-effects)
+                  (_runtime-collect-updates C)))
+      (let-values (((changed-by-merge? merge-effects)
+                    (_runtime-apply-updates potential-updates)))
+        (values (append propagator-effects merge-effects))))))
+
 
 
 (define (_runtime-handle-dynamic-connections C connect-effects connect-once-effects)
