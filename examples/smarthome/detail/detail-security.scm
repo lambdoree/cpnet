@@ -15,7 +15,9 @@
   (propagators
    ((prop p-sec-on-door-change door_input -> alarm_state)
     (lambda (door-state src-cell)
-      (let ((sec-status (get-cell-value 'security-system 'status)))
+      (let* ((parts (string-split (symbol->string (cell-id src-cell)) #\.))
+             (cat-name (string->symbol (if (= (length parts) 3) (list-ref parts 1) (car parts))))
+             (sec-status (get-cell-value cat-name 'status)))
         (if (and (or (eq? sec-status 'armed_away) (eq? sec-status 'armed_home))
                  (eq? door-state 'open))
             (cons 'on '())

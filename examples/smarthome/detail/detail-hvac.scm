@@ -3,13 +3,13 @@
   #:use-module (cpnet core)
   #:export (thermostat air-conditioner heater))
 
-(define (update-thermostat-commands)
-  (let* ((mode (get-cell-value 'thermostat 'mode))
-         (current (get-cell-value 'thermostat 'current_temp))
-         (desired (get-cell-value 'thermostat 'desired_temp))
+(define (update-thermostat-commands cat-name)
+  (let* ((mode (get-cell-value cat-name 'mode))
+         (current (get-cell-value cat-name 'current_temp))
+         (desired (get-cell-value cat-name 'desired_temp))
          (ac-cmd (if (and (eq? mode 'cool) (> current desired)) 'on 'off))
          (heater-cmd (if (and (eq? mode 'heat) (< current desired)) 'on 'off)))
-    (cons ac-cmd (list (set-cell-effect 'thermostat 'heater_command heater-cmd)))))
+    (cons ac-cmd (list (set-cell-effect cat-name 'heater_command heater-cmd)))))
 
 ;; Sub-System: Thermostat
 (define-category thermostat
@@ -21,11 +21,11 @@
          (Cell outside_temp_f 78))
   (propagators
    ((prop p-therm-on-mode-change mode -> ac_command)
-    (lambda (v s) (update-thermostat-commands)))
+    (lambda (v s) (update-thermostat-commands 'thermostat)))
    ((prop p-therm-on-temp-change current_temp -> ac_command)
-    (lambda (v s) (update-thermostat-commands)))
+    (lambda (v s) (update-thermostat-commands 'thermostat)))
    ((prop p-therm-on-desired-change desired_temp -> ac_command)
-    (lambda (v s) (update-thermostat-commands)))))
+    (lambda (v s) (update-thermostat-commands 'thermostat)))))
 
 ;; Sub-System: Air Conditioner
 (define-category air-conditioner

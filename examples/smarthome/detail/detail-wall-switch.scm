@@ -14,13 +14,15 @@
    ((prop toggle_switch button_press -> switch_state)
     (lambda (v src-cell)
       (if v
-          (let ((current-state (get-cell-value 'wall-switch 'switch_state)))
+          (let* ((parts (string-split (symbol->string (cell-id src-cell)) #\.))
+                 (cat-name (string->symbol (if (= (length parts) 3) (list-ref parts 1) (car parts))))
+                 (current-state (get-cell-value cat-name 'switch_state)))
             (let ((new-state (cond ((eq? current-state 'auto) 'on)
                                    ((eq? current-state 'on) 'off)
                                    ((eq? current-state 'off) 'on)
                                    (else current-state))))
               (cons new-state
-                    (list (set-cell-effect 'wall-switch 'button_press #f)))))
+                    (list (set-cell-effect cat-name 'button_press #f)))))
           (cons #f '()))))))
 
 ;; Sub-System: Light Bulb

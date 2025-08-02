@@ -17,12 +17,33 @@
              define-system-functor))
 
 (define current-system (make-parameter #f))
+(define current-namespace (make-parameter #f))
 
 (define (get-cell-value category-name cell-name)
-  (cell-value (system-find-cell (current-system) category-name cell-name)))
+  (let* ((sys (current-system))
+         (ns (current-namespace))
+         (mangled-cat-name (if ns
+                               (string->symbol (format #f "~a.~a" ns category-name))
+                               #f)))
+    (let ((cell (or (and mangled-cat-name (system-find-cell sys mangled-cat-name cell-name))
+                    (system-find-cell sys category-name cell-name))))
+      (if cell
+          (cell-value cell)
+          (begin
+            (format (current-error-port) "Warning: get-cell-value could not find ~a.~a in namespace ~a\n" category-name cell-name ns)
+            #f)))))
 
 (define (set-cell-effect category-name cell-name value)
-  (make-effect 'set-value (cons (system-find-cell (current-system) category-name cell-name) value)))
+  (let* ((sys (current-system))
+         (ns (current-namespace))
+         (mangled-cat-name (if ns
+                               (string->symbol (format #f "~a.~a" ns category-name))
+                               #f)))
+    (let ((cell (or (and mangled-cat-name (system-find-cell sys mangled-cat-name cell-name))
+                    (system-find-cell sys category-name cell-name))))
+      (if cell
+          (make-effect 'set-value (cons cell value))
+          (error "set-cell-effect: cannot find cell" (if ns (list ns category-name) category-name) cell-name)))))
 
 (define (split-sym stx)
   (let* ((sym   (syntax->datum stx))
@@ -40,9 +61,10 @@
        (cond
         ((= (length parts) 3) ; System.category.cell
          (let ((sys-name (list-ref parts 0)) (cat-name (list-ref parts 1)) (cell-name (list-ref parts 2)))
-           (with-syntax ([cat (datum->syntax cell-stx cat-name)]
-                         [cell (datum->syntax cell-stx cell-name)])
-             #'(system-find-cell (current-system) 'cat 'cell))))
+           (let ((mangled-cat-name (string->symbol (format #f "~a.~a" sys-name cat-name))))
+             (with-syntax ([cat (datum->syntax cell-stx mangled-cat-name)]
+                           [cell (datum->syntax cell-stx cell-name)])
+               #'(system-find-cell (current-system) 'cat 'cell)))))
         ((= (length parts) 2) ; category.cell
          (let ((cat-name (list-ref parts 0)) (cell-name (list-ref parts 1)))
            (with-syntax ([cat (datum->syntax cell-stx cat-name)]
@@ -59,19 +81,11 @@
          #'(system-add-morphisms
             (current-system)
             (list
-             (let ((propagator-fn fn)
-                   (target-cell-obj tgt-cell))
-               (make-propagator
-                'pid
-                src-cell
-                target-cell-obj
-                (lambda (v source-cell)
-                  (let* ((result (propagator-fn v source-cell))
-                         (new-val (car result))
-                         (effects (cdr result)))
-                    (if (and (null? effects) (equal? new-val (cell-value target-cell-obj)))
-                        (cons #f '()) ; value hasn't changed, and no effects. no-op.
-                        result))))))))])))
+             (make-propagator
+              'pid
+              src-cell
+              tgt-cell
+              fn))))])))
 
 (define-syntax connector
   (lambda (stx)
@@ -123,7 +137,8 @@
          (system-add-cell-table (current-system) 'name table)
          (system-add-objects (current-system)
 			     (list
-			      (let ((c# (make-cell 'id init)))
+			      (let* ((cid (string->symbol (format #f "~a.~a" 'name 'id)))
+                                     (c# (make-cell cid init)))
 				(hash-set! table 'id c#)
 				c#)
 			      ...))
@@ -135,24 +150,18 @@
          (system-add-cell-table (current-system) 'name table)
          (system-add-objects (current-system)
 			     (list
-			      (let ((c# (make-cell 'id init)))
+			      (let* ((cid (string->symbol (format #f "~a.~a" 'name 'id)))
+                                     (c# (make-cell cid init)))
 				(hash-set! table 'id c#)
 				c#)
 			      ...))
          (system-add-morphisms (current-system)
 			       (list
-				(let ((target-cell-obj (hash-ref table 'tgt)))
-				  (make-propagator
-				   'pid
-				   (hash-ref table 'src)
-				   target-cell-obj
-				   (lambda (value source-cell)
-				     (let* ((user-fn-result (fn value source-cell))
-					    (new-val (car user-fn-result))
-					    (effects (cdr user-fn-result)))
-				       (if (and (null? effects) (equal? new-val (cell-value target-cell-obj)))
-					   (cons #f '()) ; no change
-					   user-fn-result)))))
+				(make-propagator
+				 (string->symbol (format #f "~a.~a" 'name 'pid))
+				 (hash-ref table 'src)
+				 (hash-ref table 'tgt)
+				 fn)
 				...))
          table))]
     
@@ -170,38 +179,70 @@
 (define-syntax-rule (define-execution name . body)
   (define (name) (begin . body)))
 
-(define-syntax-rule (define-cpnet-system name . body)
-  (define name
-    (let ((new-system (make-system)))
-      (parameterize ((current-system new-system))
-        (begin . body))
-      new-system)))
+(define-syntax define-cpnet-system
+  (lambda (stx)
+    (syntax-case stx ()
+      [(_ name . body)
+       (with-syntax ([q-name (datum->syntax #'name (list 'quote (syntax->datum #'name)))])
+         #'(define name
+             (let ((new-system (make-system q-name)))
+               (parameterize ((current-system new-system))
+                 (begin . body))
+               new-system)))])))
 
-(define (merge-system! target-system source-system)
-  (let ((net (system-get-net source-system)))
-    (system-add-objects target-system (category-objects net))
-    (system-add-morphisms target-system (category-morphisms net))
+(define (add-subsystem! target-system source-system)
+  (let ((source-prefix (system-name source-system))
+        (old->new-cell-map (make-hash-table)))
+    (when (not source-prefix)
+      (error "Cannot compose an unnamed system" source-system))
+    
+    (let ((source-net (system-get-net source-system)))
+      (for-each
+       (lambda (old-cell)
+         (let* ((new-id (string->symbol (format #f "~a.~a" source-prefix (cell-id old-cell))))
+                (new-cell (make-cell new-id (cell-value old-cell) (cell-merge-fn old-cell))))
+           (hash-set! old->new-cell-map old-cell new-cell)))
+       (category-objects source-net))
+      (system-add-objects target-system (hash-map->list (lambda (k v) v) old->new-cell-map)))
+
+    (let ((source-net (system-get-net source-system)))
+      (for-each
+       (lambda (old-mor)
+         (let* ((new-dom (hash-ref old->new-cell-map (arrow-dom old-mor) #f))
+                (new-cod (hash-ref old->new-cell-map (arrow-cod old-mor) #f))
+                (old-fn (arrow-fn old-mor))
+                (new-fn (lambda (v new-source-cell)
+                          (parameterize ((current-namespace source-prefix))
+                            (old-fn v new-source-cell))))
+                (new-mor-id (string->symbol (format #f "~a.~a" source-prefix (arrow-id old-mor)))))
+           (if (and new-dom new-cod)
+               (let ((new-mor (make-propagator new-mor-id new-dom new-cod new-fn)))
+                 (system-add-morphisms target-system new-mor))
+               (format (current-error-port) "Warning: could not map morphism ~a during subsystem merge.\n" (arrow-id old-mor)))))
+       (category-morphisms source-net)))
+
     (hash-for-each
      (lambda (cat-name table)
-       (system-add-cell-table target-system cat-name table))
+       (let* ((mangled-cat-name (string->symbol (format #f "~a.~a" source-prefix cat-name)))
+              (new-table (make-hash-table)))
+         (hash-for-each
+          (lambda (cell-name old-cell)
+            (let ((new-cell (hash-ref old->new-cell-map old-cell)))
+              (hash-set! new-table cell-name new-cell)))
+          table)
+         (system-add-cell-table target-system mangled-cat-name new-table)))
      (system-get-cell-tables source-system))))
-
 
 (define-syntax compose-systems
   (syntax-rules (systems connections execution)
-    ;; systems 병합 후 연결 정의 및 실행 시나리오 호출
     [(_ (systems sys ...)
         (connections conn-proc ...)
         (execution . exec-procs))
-     (let ((new-system (make-system)))
-       ;; 서브시스템 병합
-       (for-each (lambda (s) (merge-system! new-system s))
+     (let ((new-system (make-system 'composed)))
+       (for-each (lambda (s) (add-subsystem! new-system s))
                  (list sys ...))
-       ;; 현재 시스템 컨텍스트에서 연결 정의 및 시나리오 실행
        (parameterize ((current-system new-system))
-         ;; 연결 정의
          (begin conn-proc ...)
-         ;; 시나리오 프로시저 호출
          (for-each (lambda (proc) (proc)) (list (lambda () (begin . exec-procs)))))
        new-system)]))
 
@@ -214,16 +255,21 @@
          (cond
           ((= (length parts) 3) ; System.category.cell
            (let ((sys-name (list-ref parts 0)) (cat-name (list-ref parts 1)) (cell-name (list-ref parts 2)))
-             (with-syntax ([cat (datum->syntax #'cell-name-stx cat-name)]
-                           [cell (datum->syntax #'cell-name-stx cell-name)])
-               #'(let ((c (system-find-cell (current-system) 'cat 'cell)))
-                   (cell-set-value! c val)))))
+             (let ((mangled-cat-name (string->symbol (format #f "~a.~a" sys-name cat-name))))
+               (with-syntax ([cat (datum->syntax #'cell-name-stx mangled-cat-name)]
+                             [cell (datum->syntax #'cell-name-stx cell-name)])
+                 #'(let ((c (system-find-cell (current-system) 'cat 'cell)))
+                     (if c
+                         (cell-set-value! c val)
+                         (error "trigger: cell not found" 'cat 'cell)))))))
           ((= (length parts) 2) ; category.cell
            (let ((cat-name (list-ref parts 0)) (cell-name (list-ref parts 1)))
              (with-syntax ([cat (datum->syntax #'cell-name-stx cat-name)]
                            [cell (datum->syntax #'cell-name-stx cell-name)])
                #'(let ((c (system-find-cell (current-system) 'cat 'cell)))
-                   (cell-set-value! c val)))))
+                   (if c
+                       (cell-set-value! c val)
+                       (error "trigger: cell not found" 'cat 'cell))))))
           (else (syntax-violation 'trigger "invalid cell specifier" #'cell-name-stx))))])))
 
 (define-syntax-rule (run)

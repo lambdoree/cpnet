@@ -7,7 +7,7 @@
   #:use-module (examples weather weather))
 
 (define-connections misc-connections
-  (propagator p-adjust-desired-temp-from-outside thermostat.outside_temp_f -> thermostat.desired_temp
+  (propagator p-adjust-desired-temp-from-outside WallSwitchSystemDef.thermostat.outside_temp_f -> WallSwitchSystemDef.thermostat.desired_temp
     (lambda (outside-temp src-cell)
       (cond ((> outside-temp 90) (cons 68 '()))   ;; It's hot, cool down more
             ((< outside-temp 32) (cons 72 '()))   ;; It's freezing, heat up more
@@ -15,11 +15,11 @@
 
 (define-execution run-weather-interaction-scenario
   (show-state "--- Weather System Influences Smarthome ---")
-  (trigger weather-station.outside_temp 95)
+  (trigger WeatherSystemDef.weather-station.outside_temp 95)
   (run)
   (show-state "Outside temp is hot (95F), desired temp should adjust to 68F")
-  (trigger thermostat.mode 'cool)
-  (trigger thermostat.current_temp 72)
+  (trigger WallSwitchSystemDef.thermostat.mode 'cool)
+  (trigger WallSwitchSystemDef.thermostat.current_temp 72)
   (run)
   (show-state "AC should turn on due to adjusted desired temp"))
 
@@ -29,8 +29,8 @@
    (connections
     (misc-connections)
     (define-system-functor weather->thermostat-functor
-      (from weather-station)
-      (to thermostat)
+      (from WeatherSystemDef.weather-station)
+      (to WallSwitchSystemDef.thermostat)
       (mappings (outside_temp -> outside_temp_f)))
     (apply-functor-as-connections weather->thermostat-functor))
    (execution

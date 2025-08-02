@@ -4,6 +4,7 @@
   #:use-module ((cpnet category) :prefix cat:)
   #:export (make-system
             system?
+            system-name
             system-get-net
             system-get-cell-tables
             system-add-cell-table
@@ -12,13 +13,15 @@
             system-add-morphisms))
 
 (define-record-type <cpnet-system>
-  (make-system-record net cell-tables)
+  (make-system-record name net cell-tables)
   system?
+  (name system-name)
   (net system-get-net)
   (cell-tables system-get-cell-tables))
 
-(define (make-system)
-  (make-system-record (core:make-cpnet-category '() '())
+(define (make-system . name)
+  (make-system-record (if (null? name) #f (car name))
+                      (core:make-cpnet-category '() '())
                       (make-hash-table)))
 
 (define (system-add-objects system . objects)
