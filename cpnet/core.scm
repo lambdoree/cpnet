@@ -142,7 +142,7 @@
                (let ((pair (assoc obj cell-map)))
                  (if pair
                      (cdr pair)
-                     (error "make-cpnet-functor: object not in cell-map" obj)))))
+                     #f))))
          (F1 (lambda (p)
                (let ((id (cat:arrow-id p)))
                  (if (and (symbol? id) (string-prefix? "id-" (symbol->string id)))
@@ -151,5 +151,5 @@
                                       (F0 (cat:arrow-dom p))
                                       (F0 (cat:arrow-cod p))
                                       (cat:arrow-fn p)))))))
-    (fun:make-functor src-cat tgt-cat F0 F1)))
+    (fun:make-functor-record src-cat tgt-cat F0 F1)))
 

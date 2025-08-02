@@ -5,7 +5,7 @@
 	    functor-tgt-cat
 	    functor-obj-map
 	    functor-mor-map
-	    make-functor))
+	    make-functor-record))
 
 (define-record-type <functor>
   (make-functor-record src-cat tgt-cat obj-map mor-map)
@@ -15,5 +15,3 @@
   (obj-map functor-obj-map)
   (mor-map functor-mor-map))
 
-(define (make-functor src-cat tgt-cat obj-map mor-map)
-  (make-functor-record src-cat tgt-cat obj-map mor-map))

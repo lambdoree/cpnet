@@ -6,7 +6,7 @@
   #:use-module (examples smarthome detail detail-power)
   #:use-module (examples smarthome detail detail-security)
   #:use-module (examples smarthome detail detail-wall-switch)
-  #:export (WallSwitchSys))
+  #:export (WallSwitchSystemDef run-smarthome-scenario))
 
 (define-connections wall-switch-to-light-connections
   (propagator p-switch-to-light wall-switch.switch_state -> light-bulb.state
@@ -45,7 +45,7 @@
   (propagator p-door-to-security door-sensor.state -> security-system.door_input
     (lambda (v src-cell) (cons v '()))))
 
-(define-execution run-scenario
+(define-execution run-smarthome-scenario
   (show-state "Initial State")
   (trigger wall-switch.button_press #t)
   (run)
@@ -90,7 +90,7 @@
   (run)
   (show-state "System disarmed, alarm turns off"))
 
-(define-cpnet-system WallSwitchSys
+(define-cpnet-system WallSwitchSystemDef
   (wall-switch)
   (light-bulb)
   (power-meter)
@@ -107,6 +107,5 @@
   (thermostat-to-heater-connections)
   (ac-to-power-aggregator-connections)
   (heater-to-power-aggregator-connections)
-  (door-to-security-connections)
-  (run-scenario))
+  (door-to-security-connections))
 

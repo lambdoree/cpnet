@@ -4,13 +4,17 @@
   #:use-module (cpnet system)
   #:use-module (cpnet runtime)
   #:use-module (cpnet category)
+  #:use-module (cpnet functor)
+  #:use-module (cpnet nt)
   #:export (define-category define-connections define-execution
              define-cpnet-system compose-systems
 	     propagator connector fan-out
 	     trigger run show-state
              current-system
              get-cell-value set-cell-effect
-	     define-functor define-nt))
+	     define-functor define-nt
+             apply-functor-as-connections
+             define-system-functor))
 
 (define current-system (make-parameter #f))
 
@@ -188,7 +192,7 @@
     ;; systems 병합 후 연결 정의 및 실행 시나리오 호출
     [(_ (systems sys ...)
         (connections conn-proc ...)
-        (execution exec-proc ...))
+        (execution . exec-procs))
      (let ((new-system (make-system)))
        ;; 서브시스템 병합
        (for-each (lambda (s) (merge-system! new-system s))
@@ -198,7 +202,7 @@
          ;; 연결 정의
          (begin conn-proc ...)
          ;; 시나리오 프로시저 호출
-         (begin (exec-proc) ...))
+         (for-each (lambda (proc) (proc)) (list (lambda () (begin . exec-procs)))))
        new-system)]))
 
 
@@ -227,6 +231,25 @@
 
 (define-syntax-rule (show-state msg)
   (runtime-show-state (current-system) msg))
+
+(define-syntax-rule (apply-functor-as-connections F)
+  (let ((functor F))
+    (let ((src-cat (functor-src-cat functor)))
+      (for-each
+       (lambda (src-obj)
+         (let ((tgt-obj ((functor-obj-map functor) src-obj)))
+           (when tgt-obj ;; if there is a mapping
+             (system-add-morphisms
+              (current-system)
+              (list
+               (make-propagator
+                (string->symbol (format #f "functor-conn-~a->~a"
+                                        (cell-id src-obj)
+                                        (cell-id tgt-obj)))
+                src-obj
+                tgt-obj
+                (lambda (v _) (cons v '()))))))))
+       (category-objects src-cat)))))
 
 (define-syntax define-functor
   (syntax-rules ()
@@ -261,11 +284,43 @@
           (category-morphisms C))
          F))]))
 
+(define-syntax define-system-functor
+  (syntax-rules (from to mappings ->)
+    [(_ name (from src-cat-name) (to tgt-cat-name) (mappings (src-cell-name -> tgt-cell-name) ...))
+     (define name
+       (let* ((sys (current-system))
+              (tables (system-get-cell-tables sys))
+              (src-cat-table (hash-ref tables 'src-cat-name))
+              (tgt-cat-table (hash-ref tables 'tgt-cat-name))
+
+              (src-objs (hash-map->list (lambda (k v) v) src-cat-table))
+              (tgt-objs (hash-map->list (lambda (k v) v) tgt-cat-table))
+              (all-mors (category-morphisms (system-get-net sys)))
+
+              (src-mors (filter (lambda (m)
+                                  (and (member (arrow-dom m) src-objs)
+                                       (member (arrow-cod m) src-objs)))
+                                all-mors))
+              (tgt-mors (filter (lambda (m)
+                                  (and (member (arrow-dom m) tgt-objs)
+                                       (member (arrow-cod m) tgt-objs)))
+                                all-mors))
+
+              (src-cat (make-cpnet-category src-objs src-mors))
+              (tgt-cat (make-cpnet-category tgt-objs tgt-mors))
+
+              (cell-map (list
+                         (cons (system-find-cell sys 'src-cat-name 'src-cell-name)
+                               (system-find-cell sys 'tgt-cat-name 'tgt-cell-name))
+                         ...))
+              )
+         (make-cpnet-functor src-cat tgt-cat cell-map)))]))
+
 (define-syntax define-nt
   (syntax-rules ()
     [(_ name F G (component obj fn) ...)
      (define name
-       (let ((η (make-nt F G (list (cons 'obj fn) ...))))
+       (let ((η (make-nt-record F G (list (cons 'obj fn) ...))))
          ;; 자연성 사각형 검증
          (for-each
           (lambda (f)

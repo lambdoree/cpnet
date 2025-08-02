@@ -1,6 +1,6 @@
 (define-module (cpnet nt)
   #:use-module (srfi srfi-9)
-  #:export (make-nt
+  #:export (make-nt-record
             nt?
             nt-src-functor
             nt-tgt-functor
@@ -13,5 +13,3 @@
   (tgt-functor nt-tgt-functor)
   (components nt-components))
 
-(define (make-nt src-functor tgt-functor components)
-  (make-nt-record src-functor tgt-functor components))

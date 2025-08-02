@@ -17,7 +17,8 @@
          (Cell desired_temp 70)
          (Cell mode 'cool) ; off, cool, heat
          (Cell ac_command 'off) ; on, off
-         (Cell heater_command 'off)) ; on, off
+         (Cell heater_command 'off) ; on, off
+         (Cell outside_temp_f 78))
   (propagators
    ((prop p-therm-on-mode-change mode -> ac_command)
     (lambda (v s) (update-thermostat-commands)))
