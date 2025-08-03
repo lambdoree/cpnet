@@ -11,8 +11,7 @@
    ((prop toggle_switch button_press -> switch_state)
     (lambda (v s)
       (if v
-          (let* ((parts (string-split (symbol->string (cell-id s)) #\.))
-                 (cat-name (string->symbol (if (= (length parts) 3) (list-ref parts 1) (car parts))))
+          (let* ((cat-name (cell-category-name s))
                  (current-state (get-cell-value cat-name 'switch_state)))
             (let ((new-state (cond ((eq? current-state 'auto) 'on)
                                    ((eq? current-state 'on) 'off)

@@ -31,7 +31,8 @@
             default-merge-fn
             replace-merge-fn
             append-merge-fn
-            max-merge-fn))
+            max-merge-fn
+            cell-category-name))
 
 (define-record-type <cell>
   (make-cell-record id value merge-fn system)
@@ -159,6 +160,18 @@
   (if (null? new-vals)
       (cons (cell-value cell) '())
       (cons (apply max (cons (cell-value cell) new-vals)) '())))
+
+(define (min-merge-fn cell new-vals)
+  (if (null? new-vals)
+      (cons (cell-value cell) '())
+      (cons (apply min (cons (cell-value cell) new-vals)) '())))
+
+(define (cell-category-name cell)
+  (let* ((id-str (symbol->string (cell-id cell)))
+         (parts (string-split id-str #\.)))
+    (if (= (length parts) 3)
+        (string->symbol (list-ref parts 1))  ; system.category.cell -> category
+        (string->symbol (list-ref parts 0)))))  ; category.cell -> category
 
 (define (make-cpnet-functor src-cat tgt-cat cell-map)
   (let* ((F0 (lambda (obj)

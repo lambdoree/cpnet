@@ -13,15 +13,21 @@
             ((< outside-temp 32) (cons 72 '()))   ;; It's freezing, heat up more
             (else (cons 70 '())))))) ;; default desired temp
 
+(define-syntax scenario-step
+  (syntax-rules ()
+    [(_ trigger-expr state-msg)
+     (begin
+       trigger-expr
+       (run)
+       (show-state state-msg))]))
+
 (define-execution run-weather-interaction-scenario
   (show-state "--- Weather System Influences Smarthome ---")
-  (trigger WeatherSystemDef.weather-station.outside_temp 95)
-  (run)
-  (show-state "Outside temp is hot (95F), desired temp should adjust to 68F")
+  (scenario-step (trigger WeatherSystemDef.weather-station.outside_temp 95)
+                 "Outside temp is hot (95F), desired temp should adjust to 68F")
   (trigger WallSwitchSystemDef.thermostat.mode 'cool)
-  (trigger WallSwitchSystemDef.thermostat.current_temp 72)
-  (run)
-  (show-state "AC should turn on due to adjusted desired temp"))
+  (scenario-step (trigger WallSwitchSystemDef.thermostat.current_temp 72)
+                 "AC should turn on due to adjusted desired temp"))
 
 (define ComposedSys
   (compose-systems

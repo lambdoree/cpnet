@@ -25,31 +25,28 @@
 (define current-system (make-parameter #f))
 (define current-namespace (make-parameter #f))
 
-(define (get-cell-value category-name cell-name)
+(define (find-cell-with-ns category-name cell-name)
   (let* ((sys (current-system))
          (ns (current-namespace))
          (mangled-cat-name (if ns
                                (string->symbol (format #f "~a.~a" ns category-name))
                                #f)))
-    (let ((cell (or (and mangled-cat-name (system-find-cell sys mangled-cat-name cell-name))
-                    (system-find-cell sys category-name cell-name))))
-      (if cell
-          (cell-value cell)
-          (begin
-            (format (current-error-port) "Warning: get-cell-value could not find ~a.~a in namespace ~a\n" category-name cell-name ns)
-            #f)))))
+    (or (and mangled-cat-name (system-find-cell sys mangled-cat-name cell-name))
+        (system-find-cell sys category-name cell-name))))
+
+(define (get-cell-value category-name cell-name)
+  (let ((cell (find-cell-with-ns category-name cell-name)))
+    (if cell
+        (cell-value cell)
+        (begin
+          (format (current-error-port) "Warning: get-cell-value could not find ~a.~a in namespace ~a\n" category-name cell-name (current-namespace))
+          #f))))
 
 (define (set-cell-effect category-name cell-name value)
-  (let* ((sys (current-system))
-         (ns (current-namespace))
-         (mangled-cat-name (if ns
-                               (string->symbol (format #f "~a.~a" ns category-name))
-                               #f)))
-    (let ((cell (or (and mangled-cat-name (system-find-cell sys mangled-cat-name cell-name))
-                    (system-find-cell sys category-name cell-name))))
-      (if cell
-          (make-effect 'set-value (cons cell value))
-          (error "set-cell-effect: cannot find cell" (if ns (list ns category-name) category-name) cell-name)))))
+  (let ((cell (find-cell-with-ns category-name cell-name)))
+    (if cell
+        (make-effect 'set-value (cons cell value))
+        (error "set-cell-effect: cannot find cell" (if (current-namespace) (list (current-namespace) category-name) category-name) cell-name))))
 
 (define (split-sym stx)
   (let* ((sym   (syntax->datum stx))
@@ -57,10 +54,6 @@
     (map string->symbol parts)))
 
 (define (get-cell-access-syntax-helper cell-stx)
-  (define (split-sym stx)
-    (let* ((sym   (syntax->datum stx))
-           (parts (string-split (symbol->string sym) #\.)))
-      (map string->symbol parts)))
   (syntax-case cell-stx ()
     [_
      (let ((parts (split-sym cell-stx)))
@@ -70,12 +63,14 @@
            (let ((mangled-cat-name (string->symbol (format #f "~a.~a" sys-name cat-name))))
              (with-syntax ([cat (datum->syntax cell-stx mangled-cat-name)]
                            [cell (datum->syntax cell-stx cell-name)])
-               #'(system-find-cell (current-system) 'cat 'cell)))))
+               #'(or (system-find-cell (current-system) 'cat 'cell)
+                     (error "Cell not found:" 'cat 'cell))))))
         ((= (length parts) 2) ; category.cell
          (let ((cat-name (list-ref parts 0)) (cell-name (list-ref parts 1)))
            (with-syntax ([cat (datum->syntax cell-stx cat-name)]
                          [cell (datum->syntax cell-stx cell-name)])
-             #'(system-find-cell (current-system) 'cat 'cell))))
+             #'(or (system-find-cell (current-system) 'cat 'cell)
+                   (error "Cell not found:" 'cat 'cell)))))
         (else (syntax-violation 'get-cell-access-syntax-helper "invalid cell specifier" cell-stx))))]))
 
 (define-syntax propagator
@@ -134,6 +129,33 @@
                                      (cons #f (list effect ...))
                                      (cons #f '()))))))))])))
 
+(define (make-cell-expr name-sym def-stx table-stx)
+  (syntax-case def-stx (Cell)
+    [(Cell id init)
+     (let ((cid-val (string->symbol (format #f "~a.~a" (syntax->datum name-sym) (syntax->datum #'id)))))
+       (with-syntax ([cid (datum->syntax #'id cid-val)])
+         #`(let ((c# (make-cell 'cid init)))
+             (hash-set! #,table-stx (quote id) c#)
+             c#)))]
+    [(Cell id init merge-fn)
+     (let ((cid-val (string->symbol (format #f "~a.~a" (syntax->datum name-sym) (syntax->datum #'id)))))
+       (with-syntax ([cid (datum->syntax #'id cid-val)])
+         #`(let ((c# (make-cell 'cid init merge-fn)))
+             (hash-set! #,table-stx (quote id) c#)
+             c#)))]
+    [_ (syntax-violation 'define-category "invalid cell definition" def-stx)]))
+
+(define (make-prop-expr name-sym prop-stx table-stx)
+  (syntax-case prop-stx (prop ->)
+    [((prop pid src -> tgt) fn)
+     (let ((pid-val (string->symbol (format #f "~a.~a" (syntax->datum name-sym) (syntax->datum #'pid)))))
+       (with-syntax ([pid (datum->syntax #'pid pid-val)])
+         #`(make-propagator 'pid
+                            (hash-ref #,table-stx (quote src))
+                            (hash-ref #,table-stx (quote tgt))
+                            fn)))]
+    [_ (syntax-violation 'define-category "invalid propagator definition" prop-stx)]))
+
 (define-syntax define-category
   (lambda (stx)
     (syntax-case stx (cells propagators)
@@ -141,23 +163,11 @@
       [(_ name (cells cell-def ...))
        (with-syntax
            ([(cell-expr ...)
-             (map (lambda (def-stx)
-                    (syntax-case def-stx (Cell)
-                      [(Cell id init)
-                       #'(let* ((cid (string->symbol (format #f "~a.~a" 'name 'id)))
-                                (c#  (make-cell cid init)))
-                           (hash-set! table 'id c#)
-                           c#)]
-                      [(Cell id init merge-fn)
-                       #'(let* ((cid (string->symbol (format #f "~a.~a" 'name 'id)))
-                                (c#  (make-cell cid init merge-fn)))
-                           (hash-set! table 'id c#)
-                           c#)]
-                      [_ (syntax-violation 'define-category "invalid cell definition" def-stx)]))
+             (map (lambda (def-stx) (make-cell-expr #'name def-stx #'table))
                   (syntax->list #'(cell-def ...)))])
          #'(define (name)
              (let ((table (make-hash-table)))
-               (system-add-cell-table (current-system) 'name table)
+               (system-add-cell-table (current-system) (quote name) table)
                (system-add-objects (current-system)
                  (list cell-expr ...))
                table)))]
@@ -165,33 +175,14 @@
       [(_ name (cells cell-def ...) (propagators prop-def ...))
        (with-syntax
            ([(cell-expr ...)
-             (map (lambda (def-stx)
-                    (syntax-case def-stx (Cell)
-                      [(Cell id init)
-                       #'(let* ((cid (string->symbol (format #f "~a.~a" 'name 'id)))
-                                (c#  (make-cell cid init)))
-                           (hash-set! table 'id c#)
-                           c#)]
-                      [(Cell id init merge-fn)
-                       #'(let* ((cid (string->symbol (format #f "~a.~a" 'name 'id)))
-                                (c#  (make-cell cid init merge-fn)))
-                           (hash-set! table 'id c#)
-                           c#)]
-                      [_ (syntax-violation 'define-category "invalid cell definition" def-stx)]))
+             (map (lambda (def-stx) (make-cell-expr #'name def-stx #'table))
                   (syntax->list #'(cell-def ...)))]
             [(prop-expr ...)
-             (map (lambda (prop-stx)
-                    (syntax-case prop-stx (prop ->)
-                      [((prop pid src -> tgt) fn)
-                       #'(make-propagator (string->symbol (format #f "~a.~a" 'name 'pid))
-                                          (hash-ref table 'src)
-                                          (hash-ref table 'tgt)
-                                          fn)]
-                      [_ (syntax-violation 'define-category "invalid propagator definition" prop-stx)]))
+             (map (lambda (prop-stx) (make-prop-expr #'name prop-stx #'table))
                   (syntax->list #'(prop-def ...)))])
          #'(define (name)
              (let ((table (make-hash-table)))
-               (system-add-cell-table (current-system) 'name table)
+               (system-add-cell-table (current-system) (quote name) table)
                (system-add-objects (current-system)
                  (list cell-expr ...))
                (system-add-morphisms (current-system)
