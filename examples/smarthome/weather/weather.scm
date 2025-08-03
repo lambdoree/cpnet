@@ -1,6 +1,6 @@
-(define-module (examples weather weather)
+(define-module (examples smarthome weather weather)
   #:use-module (cpnet dsl)
-  #:use-module (examples weather detail detail-weather)
+  #:use-module (examples smarthome weather detail detail-weather)
   #:export (WeatherSystemDef run-weather-scenario))
 
 (define-execution run-weather-scenario

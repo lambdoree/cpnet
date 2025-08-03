@@ -1,4 +1,4 @@
-(define-module (examples weather detail detail-weather)
+(define-module (examples smarthome weather detail detail-weather)
   #:use-module (cpnet dsl)
   #:use-module (cpnet core)
   #:export (weather-station))

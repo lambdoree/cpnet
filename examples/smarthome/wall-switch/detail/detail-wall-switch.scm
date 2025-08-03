@@ -1,9 +1,6 @@
-(define-module (examples smarthome detail detail-wall-switch)
+(define-module (examples smarthome wall-switch detail detail-wall-switch)
   #:use-module (cpnet dsl)
   #:use-module (cpnet core)
-  #:use-module (examples smarthome detail detail-power)
-  #:use-module (examples smarthome detail detail-hvac)
-  #:use-module (examples smarthome detail detail-security)
   #:export (wall-switch light-bulb))
 
 ;; Sub-System: Wall Switch

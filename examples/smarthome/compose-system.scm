@@ -1,10 +1,10 @@
-(define-module (examples compose-system)
+(define-module (examples smarthome compose-system)
   #:use-module (cpnet dsl)
   #:use-module (cpnet core)
   #:use-module (cpnet category)
   #:use-module (cpnet system)
-  #:use-module (examples smarthome wall-switch)
-  #:use-module (examples weather weather))
+  #:use-module (examples smarthome wall-switch wall-switch)
+  #:use-module (examples smarthome weather weather))
 
 (define-connections misc-connections
   (propagator p-adjust-desired-temp-from-outside WallSwitchSystemDef.thermostat.outside_temp_f -> WallSwitchSystemDef.thermostat.desired_temp

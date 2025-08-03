@@ -1,4 +1,4 @@
-(define-module (examples smarthome detail detail-security)
+(define-module (examples smarthome wall-switch detail detail-security)
   #:use-module (cpnet dsl)
   #:use-module (cpnet core)
   #:export (door-sensor security-system))

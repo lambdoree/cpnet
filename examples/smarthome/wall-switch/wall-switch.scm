@@ -1,11 +1,11 @@
-(define-module (examples smarthome wall-switch)
+(define-module (examples smarthome wall-switch wall-switch)
   #:use-module (srfi srfi-1)
   #:use-module (cpnet dsl)
   #:use-module (cpnet core)
-  #:use-module (examples smarthome detail detail-hvac)
-  #:use-module (examples smarthome detail detail-power)
-  #:use-module (examples smarthome detail detail-security)
-  #:use-module (examples smarthome detail detail-wall-switch)
+  #:use-module (examples smarthome wall-switch detail detail-hvac)
+  #:use-module (examples smarthome wall-switch detail detail-power)
+  #:use-module (examples smarthome wall-switch detail detail-security)
+  #:use-module (examples smarthome wall-switch detail detail-wall-switch)
   #:export (WallSwitchSystemDef run-smarthome-scenario))
 
 (define-connections wall-switch-to-light-connections

@@ -1,4 +1,4 @@
-(define-module (examples smarthome detail detail-hvac)
+(define-module (examples smarthome wall-switch detail detail-hvac)
   #:use-module (cpnet dsl)
   #:use-module (cpnet core)
   #:export (thermostat air-conditioner heater))

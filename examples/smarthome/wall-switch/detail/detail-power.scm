@@ -1,4 +1,4 @@
-(define-module (examples smarthome detail detail-power)
+(define-module (examples smarthome wall-switch detail detail-power)
   #:use-module (cpnet dsl)
   #:use-module (cpnet core)
   #:export (power-meter power-aggregator))
