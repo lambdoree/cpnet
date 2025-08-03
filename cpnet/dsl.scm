@@ -16,6 +16,12 @@
              apply-functor-as-connections
              define-system-functor))
 
+(define (syntax->list stx)
+  (syntax-case stx ()
+    (() '())
+    ((x . xs) (cons #'x (syntax->list #'xs)))
+    (_ (syntax-violation 'syntax->list "not a proper list" stx))))
+
 (define current-system (make-parameter #f))
 (define current-namespace (make-parameter #f))
 
@@ -129,43 +135,68 @@
                                      (cons #f '()))))))))])))
 
 (define-syntax define-category
-  (syntax-rules (cells propagators)
-    ;; cells-only
-    [(_ name (cells (Cell id init) ...))
-     (define (name)
-       (let ((table (make-hash-table)))
-         (system-add-cell-table (current-system) 'name table)
-         (system-add-objects (current-system)
-			     (list
-			      (let* ((cid (string->symbol (format #f "~a.~a" 'name 'id)))
-                                     (c# (make-cell cid init)))
-				(hash-set! table 'id c#)
-				c#)
-			      ...))
-         table))]
-    ;; cells + propagators
-    [(_ name (cells (Cell id init) ...) (propagators ((prop pid src -> tgt) fn) ...))
-     (define (name)
-       (let ((table (make-hash-table)))
-         (system-add-cell-table (current-system) 'name table)
-         (system-add-objects (current-system)
-			     (list
-			      (let* ((cid (string->symbol (format #f "~a.~a" 'name 'id)))
-                                     (c# (make-cell cid init)))
-				(hash-set! table 'id c#)
-				c#)
-			      ...))
-         (system-add-morphisms (current-system)
-			       (list
-				(make-propagator
-				 (string->symbol (format #f "~a.~a" 'name 'pid))
-				 (hash-ref table 'src)
-				 (hash-ref table 'tgt)
-				 fn)
-				...))
-         table))]
-    
-    ))
+  (lambda (stx)
+    (syntax-case stx (cells propagators)
+      ;; cells-only
+      [(_ name (cells cell-def ...))
+       (with-syntax
+           ([(cell-expr ...)
+             (map (lambda (def-stx)
+                    (syntax-case def-stx (Cell)
+                      [(Cell id init)
+                       #'(let* ((cid (string->symbol (format #f "~a.~a" 'name 'id)))
+                                (c#  (make-cell cid init)))
+                           (hash-set! table 'id c#)
+                           c#)]
+                      [(Cell id init merge-fn)
+                       #'(let* ((cid (string->symbol (format #f "~a.~a" 'name 'id)))
+                                (c#  (make-cell cid init merge-fn)))
+                           (hash-set! table 'id c#)
+                           c#)]
+                      [_ (syntax-violation 'define-category "invalid cell definition" def-stx)]))
+                  (syntax->list #'(cell-def ...)))])
+         #'(define (name)
+             (let ((table (make-hash-table)))
+               (system-add-cell-table (current-system) 'name table)
+               (system-add-objects (current-system)
+                 (list cell-expr ...))
+               table)))]
+      ;; cells + propagators
+      [(_ name (cells cell-def ...) (propagators prop-def ...))
+       (with-syntax
+           ([(cell-expr ...)
+             (map (lambda (def-stx)
+                    (syntax-case def-stx (Cell)
+                      [(Cell id init)
+                       #'(let* ((cid (string->symbol (format #f "~a.~a" 'name 'id)))
+                                (c#  (make-cell cid init)))
+                           (hash-set! table 'id c#)
+                           c#)]
+                      [(Cell id init merge-fn)
+                       #'(let* ((cid (string->symbol (format #f "~a.~a" 'name 'id)))
+                                (c#  (make-cell cid init merge-fn)))
+                           (hash-set! table 'id c#)
+                           c#)]
+                      [_ (syntax-violation 'define-category "invalid cell definition" def-stx)]))
+                  (syntax->list #'(cell-def ...)))]
+            [(prop-expr ...)
+             (map (lambda (prop-stx)
+                    (syntax-case prop-stx (prop ->)
+                      [((prop pid src -> tgt) fn)
+                       #'(make-propagator (string->symbol (format #f "~a.~a" 'name 'pid))
+                                          (hash-ref table 'src)
+                                          (hash-ref table 'tgt)
+                                          fn)]
+                      [_ (syntax-violation 'define-category "invalid propagator definition" prop-stx)]))
+                  (syntax->list #'(prop-def ...)))])
+         #'(define (name)
+             (let ((table (make-hash-table)))
+               (system-add-cell-table (current-system) 'name table)
+               (system-add-objects (current-system)
+                 (list cell-expr ...))
+               (system-add-morphisms (current-system)
+                 (list prop-expr ...))
+               table)))])))
 
 (define-syntax define-connections
   (syntax-rules (propagator connector)

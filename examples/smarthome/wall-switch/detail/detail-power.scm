@@ -11,15 +11,15 @@
 
 ;; Sub-System: Power Meter
 (define-category power-meter
-  (cells (Cell power_usage 0))) ;; in Watts
+  (cells (Cell power_usage 0 default-merge-fn))) ;; in Watts
 
 ;; Sub-System: Power Aggregator
 (define-category power-aggregator
-  (cells (Cell power_in_1 0)
-         (Cell power_in_2 0)
-         (Cell power_in_3 0)
-         (Cell total_power 0)
-         (Cell peak_power 0))
+  (cells (Cell power_in_1 0 default-merge-fn)
+         (Cell power_in_2 0 default-merge-fn)
+         (Cell power_in_3 0 default-merge-fn)
+         (Cell total_power 0 default-merge-fn)
+         (Cell peak_power 0 max-merge-fn))
   (propagators
    ((prop p-update-total-from-1 power_in_1 -> total_power)
     (lambda (v s) (update-total-power 'power-aggregator)))
@@ -28,8 +28,8 @@
    ((prop p-update-total-from-3 power_in_3 -> total_power)
     (lambda (v s) (update-total-power 'power-aggregator)))
    ((prop p-update-peak total_power -> peak_power)
-    (lambda (current-total src-cell)
-      (let* ((parts (string-split (symbol->string (cell-id src-cell)) #\.))
+    (lambda (current-total s)
+      (let* ((parts (string-split (symbol->string (cell-id s)) #\.))
              (cat-name (string->symbol (if (= (length parts) 3) (list-ref parts 1) (car parts))))
              (current-peak (get-cell-value cat-name 'peak_power)))
         (if (> current-total current-peak)

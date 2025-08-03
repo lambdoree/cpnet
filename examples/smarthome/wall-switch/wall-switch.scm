@@ -10,40 +10,40 @@
 
 (define-connections wall-switch-to-light-connections
   (propagator p-switch-to-light wall-switch.switch_state -> light-bulb.state
-    (lambda (v src-cell)
+    (lambda (v s)
       (let ((light-state (if (eq? v 'on) 'on 'off)))
         (cons light-state '())))))
 
 (define-connections light-to-power-meter-connections
   (propagator p-light-to-power light-bulb.state -> power-meter.power_usage
-    (lambda (v src-cell)
+    (lambda (v s)
       (let ((usage (if (eq? v 'on) 60 0)))
         (cons usage '())))))
 
 (define-connections power-meter-to-aggregator-connections
   (propagator p-meter-to-aggregator power-meter.power_usage -> power-aggregator.power_in_1
-    (lambda (v src-cell)
+    (lambda (v s)
       (cons v '()))))
 
 (define-connections thermostat-to-ac-connections
   (propagator p-thermostat-to-ac thermostat.ac_command -> air-conditioner.state
-    (lambda (v src-cell) (cons v '()))))
+    (lambda (v s) (cons v '()))))
 
 (define-connections thermostat-to-heater-connections
   (propagator p-thermostat-to-heater thermostat.heater_command -> heater.state
-    (lambda (v src-cell) (cons v '()))))
+    (lambda (v s) (cons v '()))))
 
 (define-connections ac-to-power-aggregator-connections
   (propagator p-ac-to-aggregator air-conditioner.power_draw -> power-aggregator.power_in_2
-    (lambda (v src-cell) (cons v '()))))
+    (lambda (v s) (cons v '()))))
 
 (define-connections heater-to-power-aggregator-connections
   (propagator p-heater-to-aggregator heater.power_draw -> power-aggregator.power_in_3
-    (lambda (v src-cell) (cons v '()))))
+    (lambda (v s) (cons v '()))))
 
 (define-connections door-to-security-connections
   (propagator p-door-to-security door-sensor.state -> security-system.door_input
-    (lambda (v src-cell) (cons v '()))))
+    (lambda (v s) (cons v '()))))
 
 (define-execution run-smarthome-scenario
   (show-state "Initial State")

@@ -62,7 +62,7 @@
            (let ((result ((cat:arrow-fn m) src-val src)))
              (when (not (null? (cdr result)))
                (set! effects (append (cdr result) effects)))
-             (when (not (eq? (car result) #f))
+             (when (not (eq? (car result) core:*nothing*))
                (let ((current (hash-ref potential-updates tgt '())))
                  (hash-set! potential-updates tgt (cons (car result) current))))))))
      (cat:category-morphisms C))

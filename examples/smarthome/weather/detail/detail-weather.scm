@@ -4,5 +4,5 @@
   #:export (weather-station))
 
 (define-category weather-station
-  (cells (Cell outside_temp 78) ;; in Fahrenheit
-         (Cell precipitation 'none))) ;; none, rain, snow
+  (cells (Cell outside_temp 78 max-merge-fn) ;; in Fahrenheit
+         (Cell precipitation 'none append-merge-fn))) ;; none, rain, snow

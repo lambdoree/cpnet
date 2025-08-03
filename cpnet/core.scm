@@ -26,7 +26,12 @@
 	    p-const
 	    make-connector-propagator
 	    make-fan-out-propagator
-	    make-cpnet-functor))
+	    make-cpnet-functor
+            *nothing*
+            default-merge-fn
+            replace-merge-fn
+            append-merge-fn
+            max-merge-fn))
 
 (define-record-type <cell>
   (make-cell-record id value merge-fn system)
@@ -43,10 +48,10 @@
   (payload effect-payload))
 
 (define (default-merge-fn cell new-vals)
-  (let* ((old-val (cell-value cell))
-         (filtered-vals (delete old-val new-vals equal?)))
+  (let* ((old (cell-value cell))
+         (filtered-vals (delete old new-vals equal?)))
     (if (null? filtered-vals)
-        (cons old-val '())
+        (cons old '())
         (let ((unique-new-vals (delete-duplicates filtered-vals equal?)))
           (if (null? (cdr unique-new-vals))
               (cons (car unique-new-vals) '())
@@ -136,6 +141,24 @@
                               to-cells)))
             (cons #f (append effects (list (make-effect 'set-value (cons src-cell #f))))))
           (cons #f '())))))
+
+(define *nothing* (gensym "nothing"))
+
+(define (replace-merge-fn cell new-vals)
+  (if (null? new-vals)
+      (cons (cell-value cell) '())
+      (cons (car new-vals) '())))
+
+(define (append-merge-fn cell new-vals)
+  (let ((current (let ((val (cell-value cell)))
+                   (if (list? val) val (if (not (eq? val #f)) (list val) '()))))
+        (news (map (lambda (v) (if (list? v) v (if (not (eq? v #f)) (list v) '()))) new-vals)))
+    (cons (delete-duplicates (apply append (cons current news)) equal?) '())))
+
+(define (max-merge-fn cell new-vals)
+  (if (null? new-vals)
+      (cons (cell-value cell) '())
+      (cons (apply max (cons (cell-value cell) new-vals)) '())))
 
 (define (make-cpnet-functor src-cat tgt-cat cell-map)
   (let* ((F0 (lambda (obj)

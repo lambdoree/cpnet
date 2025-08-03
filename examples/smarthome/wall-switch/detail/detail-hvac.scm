@@ -13,12 +13,12 @@
 
 ;; Sub-System: Thermostat
 (define-category thermostat
-  (cells (Cell current_temp 72)
-         (Cell desired_temp 70)
-         (Cell mode 'cool) ; off, cool, heat
-         (Cell ac_command 'off) ; on, off
-         (Cell heater_command 'off) ; on, off
-         (Cell outside_temp_f 78))
+  (cells (Cell current_temp 72 default-merge-fn)
+         (Cell desired_temp 70 default-merge-fn)
+         (Cell mode 'cool default-merge-fn) ; off, cool, heat
+         (Cell ac_command 'off default-merge-fn) ; on, off
+         (Cell heater_command 'off default-merge-fn) ; on, off
+         (Cell outside_temp_f 78 max-merge-fn))
   (propagators
    ((prop p-therm-on-mode-change mode -> ac_command)
     (lambda (v s) (update-thermostat-commands 'thermostat)))
@@ -29,18 +29,18 @@
 
 ;; Sub-System: Air Conditioner
 (define-category air-conditioner
-  (cells (Cell state 'off) ; on, off
-         (Cell power_draw 0))
+  (cells (Cell state 'off default-merge-fn) ; on, off
+         (Cell power_draw 0 default-merge-fn))
   (propagators
    ((prop p-update-ac-power state -> power_draw)
-    (lambda (state src-cell)
+    (lambda (state s)
       (if (eq? state 'on) (cons 1500 '()) (cons 0 '()))))))
 
 ;; Sub-System: Heater
 (define-category heater
-  (cells (Cell state 'off) ; on, off
-         (Cell power_draw 0))
+  (cells (Cell state 'off default-merge-fn) ; on, off
+         (Cell power_draw 0 default-merge-fn))
   (propagators
    ((prop p-update-heater-power state -> power_draw)
-    (lambda (state src-cell)
+    (lambda (state s)
       (if (eq? state 'on) (cons 2000 '()) (cons 0 '()))))))

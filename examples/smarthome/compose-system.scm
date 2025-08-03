@@ -8,7 +8,7 @@
 
 (define-connections misc-connections
   (propagator p-adjust-desired-temp-from-outside WallSwitchSystemDef.thermostat.outside_temp_f -> WallSwitchSystemDef.thermostat.desired_temp
-    (lambda (outside-temp src-cell)
+    (lambda (outside-temp s)
       (cond ((> outside-temp 90) (cons 68 '()))   ;; It's hot, cool down more
             ((< outside-temp 32) (cons 72 '()))   ;; It's freezing, heat up more
             (else (cons 70 '())))))) ;; default desired temp
