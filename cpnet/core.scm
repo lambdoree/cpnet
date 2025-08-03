@@ -23,15 +23,13 @@
 	    propagator-compose
 	    propagator-id-fn
 	    make-cpnet-category
-	    p-const
-	    make-connector-propagator
-	    make-fan-out-propagator
 	    make-cpnet-functor
             *nothing*
             default-merge-fn
             replace-merge-fn
             append-merge-fn
             max-merge-fn
+            min-merge-fn
             cell-category-name))
 
 (define-record-type <cell>
@@ -117,31 +115,6 @@
    cat:arrow-id
    objects
    morphisms))
-
-(define (p-const id trigger-cell output-cell const-value)
-  (make-propagator id trigger-cell output-cell
-		   (lambda (val src-cell)
-		     (if val
-			 (cons const-value
-			       (list (make-effect 'set-value (cons src-cell #f))))
-			 (cons #f '())))))
-
-(define (make-connector-propagator id from-cell to-cell)
-  (make-propagator id from-cell to-cell
-    (lambda (v src-cell)
-      (if v
-          (cons v (list (make-effect 'set-value (cons src-cell #f))))
-          (cons #f '())))))
-
-(define (make-fan-out-propagator id from-cell to-cells)
-  (make-propagator id from-cell from-cell
-    (lambda (val src-cell)
-      (if val
-          (let ((effects (map (lambda (to-cell)
-                                (make-effect 'set-value (cons to-cell val)))
-                              to-cells)))
-            (cons #f (append effects (list (make-effect 'set-value (cons src-cell #f))))))
-          (cons #f '())))))
 
 (define *nothing* (gensym "nothing"))
 

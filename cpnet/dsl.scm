@@ -6,6 +6,7 @@
   #:use-module (cpnet category)
   #:use-module (cpnet functor)
   #:use-module (cpnet nt)
+  #:use-module (srfi srfi-11)
   #:export (define-category define-connections define-execution
              define-cpnet-system compose-systems
 	     propagator connector fan-out
@@ -56,30 +57,46 @@
 (define (get-cell-access-syntax-helper cell-stx)
   (syntax-case cell-stx ()
     [_
-     (let ((parts (split-sym cell-stx)))
-       (cond
-        ((= (length parts) 3) ; System.category.cell
-         (let ((sys-name (list-ref parts 0)) (cat-name (list-ref parts 1)) (cell-name (list-ref parts 2)))
-           (let ((mangled-cat-name (string->symbol (format #f "~a.~a" sys-name cat-name))))
-             (with-syntax ([cat (datum->syntax cell-stx mangled-cat-name)]
-                           [cell (datum->syntax cell-stx cell-name)])
-               #'(or (system-find-cell (current-system) 'cat 'cell)
-                     (error "Cell not found:" 'cat 'cell))))))
-        ((= (length parts) 2) ; category.cell
-         (let ((cat-name (list-ref parts 0)) (cell-name (list-ref parts 1)))
-           (with-syntax ([cat (datum->syntax cell-stx cat-name)]
-                         [cell (datum->syntax cell-stx cell-name)])
-             #'(or (system-find-cell (current-system) 'cat 'cell)
-                   (error "Cell not found:" 'cat 'cell)))))
-        (else (syntax-violation 'get-cell-access-syntax-helper "invalid cell specifier" cell-stx))))]))
+     (let-values ([(cat-name cell-name)
+                   (let ((parts (split-sym cell-stx)))
+                     (cond
+                      ((= (length parts) 3) ; System.category.cell
+                       (values (string->symbol (format #f "~a.~a" (list-ref parts 0) (list-ref parts 1)))
+                               (list-ref parts 2)))
+                      ((= (length parts) 2) ; category.cell
+                       (values (list-ref parts 0) (list-ref parts 1)))
+                      (else (syntax-violation 'get-cell-access-syntax-helper "invalid cell specifier" cell-stx))))])
+       (with-syntax ([cat (datum->syntax cell-stx cat-name)]
+                     [cell (datum->syntax cell-stx cell-name)])
+         #'(or (system-find-cell (current-system) 'cat 'cell)
+               (error "Cell not found:" 'cat 'cell))))]))
 
 (define-syntax propagator
   (lambda (stx)
     (syntax-case stx (->)
+      ;; N:M
+      [(_ pid (src ...) -> (tgt ...) fn)
+       (with-syntax ([(src-cell ...) (map get-cell-access-syntax-helper (syntax->list #'(src ...)))]
+                     [(tgt-cell ...) (map get-cell-access-syntax-helper (syntax->list #'(tgt ...)))])
+         #`(system-add-morphisms (current-system)
+            (list (make-propagator 'pid (list src-cell ...) (list tgt-cell ...) fn))))]
+      ;; N:1
+      [(_ pid (src ...) -> tgt fn)
+       (with-syntax ([(src-cell ...) (map get-cell-access-syntax-helper (syntax->list #'(src ...)))]
+                     [tgt-cell (get-cell-access-syntax-helper #'tgt)])
+         #`(system-add-morphisms (current-system)
+            (list (make-propagator 'pid (list src-cell ...) tgt-cell fn))))]
+      ;; 1:N
+      [(_ pid src -> (tgt ...) fn)
+       (with-syntax ([src-cell (get-cell-access-syntax-helper #'src)]
+                     [(tgt-cell ...) (map get-cell-access-syntax-helper (syntax->list #'(tgt ...)))])
+         #`(system-add-morphisms (current-system)
+            (list (make-propagator 'pid src-cell (list tgt-cell ...) fn))))]
+      ;; 1:1
       [(_ pid src -> tgt fn)
        (with-syntax ([src-cell (get-cell-access-syntax-helper #'src)]
                      [tgt-cell (get-cell-access-syntax-helper #'tgt)])
-         #'(system-add-morphisms
+         #`(system-add-morphisms
             (current-system)
             (list
              (make-propagator
@@ -147,6 +164,26 @@
 
 (define (make-prop-expr name-sym prop-stx table-stx)
   (syntax-case prop-stx (prop ->)
+    ;; N:M
+    [((prop pid (src ...) -> (tgt ...)) fn)
+     (let ((pid-val (string->symbol (format #f "~a.~a" (syntax->datum name-sym) (syntax->datum #'pid)))))
+       (with-syntax ([pid (datum->syntax #'pid pid-val)]
+                     [(src-ref ...) (map (lambda (s) #`(hash-ref #,table-stx '#,s)) (syntax->list #'(src ...)))]
+                     [(tgt-ref ...) (map (lambda (s) #`(hash-ref #,table-stx '#,s)) (syntax->list #'(tgt ...)))])
+         #`(make-propagator 'pid (list src-ref ...) (list tgt-ref ...) fn)))]
+    ;; N:1
+    [((prop pid (src ...) -> tgt) fn)
+     (let ((pid-val (string->symbol (format #f "~a.~a" (syntax->datum name-sym) (syntax->datum #'pid)))))
+       (with-syntax ([pid (datum->syntax #'pid pid-val)]
+                     [(src-ref ...) (map (lambda (s) #`(hash-ref #,table-stx '#,s)) (syntax->list #'(src ...)))])
+         #`(make-propagator 'pid (list src-ref ...) (hash-ref #,table-stx 'tgt) fn)))]
+    ;; 1:N
+    [((prop pid src -> (tgt ...)) fn)
+     (let ((pid-val (string->symbol (format #f "~a.~a" (syntax->datum name-sym) (syntax->datum #'pid)))))
+       (with-syntax ([pid (datum->syntax #'pid pid-val)]
+                     [(tgt-ref ...) (map (lambda (s) #`(hash-ref #,table-stx '#,s)) (syntax->list #'(tgt ...)))])
+         #`(make-propagator 'pid (hash-ref #,table-stx 'src) (list tgt-ref ...) fn)))]
+    ;; 1:1
     [((prop pid src -> tgt) fn)
      (let ((pid-val (string->symbol (format #f "~a.~a" (syntax->datum name-sym) (syntax->datum #'pid)))))
        (with-syntax ([pid (datum->syntax #'pid pid-val)])
@@ -273,26 +310,9 @@
   (lambda (stx)
     (syntax-case stx ()
       [(_ cell-name-stx val)
-       (let ((parts (split-sym #'cell-name-stx)))
-         (cond
-          ((= (length parts) 3) ; System.category.cell
-           (let ((sys-name (list-ref parts 0)) (cat-name (list-ref parts 1)) (cell-name (list-ref parts 2)))
-             (let ((mangled-cat-name (string->symbol (format #f "~a.~a" sys-name cat-name))))
-               (with-syntax ([cat (datum->syntax #'cell-name-stx mangled-cat-name)]
-                             [cell (datum->syntax #'cell-name-stx cell-name)])
-                 #'(let ((c (system-find-cell (current-system) 'cat 'cell)))
-                     (if c
-                         (cell-set-value! c val)
-                         (error "trigger: cell not found" 'cat 'cell)))))))
-          ((= (length parts) 2) ; category.cell
-           (let ((cat-name (list-ref parts 0)) (cell-name (list-ref parts 1)))
-             (with-syntax ([cat (datum->syntax #'cell-name-stx cat-name)]
-                           [cell (datum->syntax #'cell-name-stx cell-name)])
-               #'(let ((c (system-find-cell (current-system) 'cat 'cell)))
-                   (if c
-                       (cell-set-value! c val)
-                       (error "trigger: cell not found" 'cat 'cell))))))
-          (else (syntax-violation 'trigger "invalid cell specifier" #'cell-name-stx))))])))
+       (with-syntax ([cell-access (get-cell-access-syntax-helper #'cell-name-stx)])
+         #'(let ((c cell-access))
+             (cell-set-value! c val)))])))
 
 (define-syntax-rule (run)
   (runtime-settle! (current-system)))
