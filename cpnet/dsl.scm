@@ -6,16 +6,21 @@
   #:use-module (cpnet category)
   #:use-module (cpnet functor)
   #:use-module (cpnet nt)
+  #:use-module (cpnet visualize)
   #:use-module (srfi srfi-11)
-  #:export (define-category define-connections define-execution
+  #:export (define-category define-connections define-scenario
              define-cpnet-system compose-systems
+             visualize
+             define-object
+             effect-scope
 	     propagator connector fan-out
 	     trigger run show-state
              current-system
              get-cell-value set-cell-effect
+             get-cell
 	     define-functor define-nt
              apply-functor-as-connections
-             define-system-functor))
+             make-system-functor))
 
 (define (syntax->list stx)
   (syntax-case stx ()
@@ -26,216 +31,265 @@
 (define current-system (make-parameter #f))
 (define current-namespace (make-parameter #f))
 
-(define (find-cell-with-ns category-name cell-name)
+(define (get-cell-value name1 . maybe-name2)
   (let* ((sys (current-system))
-         (ns (current-namespace))
-         (mangled-cat-name (if ns
-                               (string->symbol (format #f "~a.~a" ns category-name))
-                               #f)))
-    (or (and mangled-cat-name (system-find-cell sys mangled-cat-name cell-name))
-        (system-find-cell sys category-name cell-name))))
+         (category-name (if (null? maybe-name2) (current-namespace) name1))
+         (cell-name (if (null? maybe-name2) name1 (car maybe-name2))))
+    (let ((cell (system-find-cell sys category-name cell-name)))
+      (if cell
+          (cell-value cell)
+          (begin
+            (when (or category-name cell-name)
+              (format (current-error-port) "Warning: get-cell-value could not find ~a.~a\n" category-name cell-name))
+            #f)))))
 
-(define (get-cell-value category-name cell-name)
-  (let ((cell (find-cell-with-ns category-name cell-name)))
-    (if cell
-        (cell-value cell)
-        (begin
-          (format (current-error-port) "Warning: get-cell-value could not find ~a.~a in namespace ~a\n" category-name cell-name (current-namespace))
-          #f))))
+(define (set-cell-effect cell-name value)
+  (let* ((sys (current-system))
+         (ns (current-namespace)))
+    (if (not ns)
+        (error "set-cell-effect must be called within an effect-scope"))
+    (let ((cell (system-find-cell sys ns cell-name)))
+      (if cell
+          (make-effect 'set-value (cons cell value))
+          (error "set-cell-effect: cannot find cell" (list ns cell-name))))))
 
-(define (set-cell-effect category-name cell-name value)
-  (let ((cell (find-cell-with-ns category-name cell-name)))
-    (if cell
-        (make-effect 'set-value (cons cell value))
-        (error "set-cell-effect: cannot find cell" (if (current-namespace) (list (current-namespace) category-name) category-name) cell-name))))
-
-(define (split-sym stx)
-  (let* ((sym   (syntax->datum stx))
-         (parts (string-split (symbol->string sym) #\.)))
-    (map string->symbol parts)))
-
-(define (get-cell-access-syntax-helper cell-stx)
-  (syntax-case cell-stx ()
-    [_
-     (let-values ([(cat-name cell-name)
-                   (let ((parts (split-sym cell-stx)))
-                     (cond
-                      ((= (length parts) 3) ; System.category.cell
-                       (values (string->symbol (format #f "~a.~a" (list-ref parts 0) (list-ref parts 1)))
-                               (list-ref parts 2)))
-                      ((= (length parts) 2) ; category.cell
-                       (values (list-ref parts 0) (list-ref parts 1)))
-                      (else (syntax-violation 'get-cell-access-syntax-helper "invalid cell specifier" cell-stx))))])
-       (with-syntax ([cat (datum->syntax cell-stx cat-name)]
-                     [cell (datum->syntax cell-stx cell-name)])
-         #'(or (system-find-cell (current-system) 'cat 'cell)
-               (error "Cell not found:" 'cat 'cell))))]))
+(define (get-cell system-or-cat-name cell-or-cat-name . maybe-cell-name)
+  (let ((sys (current-system)))
+    (if (system? system-or-cat-name)
+      (let* ((subsystem system-or-cat-name)
+             (category-name cell-or-cat-name)
+             (cell-name (car maybe-cell-name))
+             (subsystem-name (system-name subsystem))
+             (mangled-cat-name (string->symbol (format #f "~a.~a" subsystem-name category-name))))
+        (or (system-find-cell sys mangled-cat-name cell-name)
+            (error "get-cell: cell not found in subsystem" (system-name sys) subsystem-name category-name cell-name)))
+      (let* ((category-name system-or-cat-name)
+            (cell-name cell-or-cat-name)
+            (direct-cell (system-find-cell sys category-name cell-name)))
+        (if direct-cell
+            direct-cell
+            (let* ((tables (system-get-cell-tables sys))
+                   (suffix (string-append "." (symbol->string category-name)))
+                   (found-pairs (filter (lambda (pair)
+                                          (let ((key-string (symbol->string (car pair))))
+                                            (and (> (string-length key-string) (string-length suffix))
+                                                 (string-suffix? suffix key-string))))
+                                        (hash-map->list cons tables))))
+              (cond
+               ((null? found-pairs) (error "get-cell: could not find cell" category-name cell-name))
+               ((= 1 (length found-pairs)) (hash-ref (cdr (car found-pairs)) cell-name #f))
+               (else (error "get-cell: ambiguous category" category-name)))))))))
 
 (define-syntax propagator
   (lambda (stx)
     (syntax-case stx (->)
-      ;; N:M
-      [(_ pid (src ...) -> (tgt ...) fn)
-       (with-syntax ([(src-cell ...) (map get-cell-access-syntax-helper (syntax->list #'(src ...)))]
-                     [(tgt-cell ...) (map get-cell-access-syntax-helper (syntax->list #'(tgt ...)))])
-         #`(system-add-morphisms (current-system)
-            (list (make-propagator 'pid (list src-cell ...) (list tgt-cell ...) fn))))]
-      ;; N:1
-      [(_ pid (src ...) -> tgt fn)
-       (with-syntax ([(src-cell ...) (map get-cell-access-syntax-helper (syntax->list #'(src ...)))]
-                     [tgt-cell (get-cell-access-syntax-helper #'tgt)])
-         #`(system-add-morphisms (current-system)
-            (list (make-propagator 'pid (list src-cell ...) tgt-cell fn))))]
-      ;; 1:N
-      [(_ pid src -> (tgt ...) fn)
-       (with-syntax ([src-cell (get-cell-access-syntax-helper #'src)]
-                     [(tgt-cell ...) (map get-cell-access-syntax-helper (syntax->list #'(tgt ...)))])
-         #`(system-add-morphisms (current-system)
-            (list (make-propagator 'pid src-cell (list tgt-cell ...) fn))))]
-      ;; 1:1
       [(_ pid src -> tgt fn)
-       (with-syntax ([src-cell (get-cell-access-syntax-helper #'src)]
-                     [tgt-cell (get-cell-access-syntax-helper #'tgt)])
-         #`(system-add-morphisms
-            (current-system)
-            (list
-             (make-propagator
-              'pid
-              src-cell
-              tgt-cell
-              fn))))])))
+       #`(system-add-morphisms
+          (current-system)
+          (list
+           (make-propagator
+            'pid
+            src
+            tgt
+            fn)))])))
 
 (define-syntax connector
   (lambda (stx)
     (syntax-case stx ()
       [(_ pid src tgt)
-       (with-syntax ([src-cell (get-cell-access-syntax-helper #'src)]
-                     [tgt-cell (get-cell-access-syntax-helper #'tgt)])
-         #'(system-add-morphisms
+       #'(system-add-morphisms
             (current-system)
             (list
              (make-propagator
               'pid
-              src-cell
-              tgt-cell
+              src
+              tgt
               (lambda (v source-cell)
                 ;; Propagate the value directly and reset the source cell to
                 ;; avoid infinite propagation loops.
                 (if v
                     (cons v (list (make-effect 'set-value (cons source-cell #f))))
-                    (cons #f '())))))))])))
+                    (cons #f '()))))))])))
 
 (define-syntax fan-out
   (lambda (stx)
     (syntax-case stx (->)
-      [(_ pid src tgts)
-       (let ((tgt-list (syntax->datum #'tgts)))
-         (if (or (null? tgt-list) (not (list? tgt-list)))
-             (syntax-violation 'fan-out "expected a non-empty list of target cells" stx #'tgts)
-             (let ((effects (map (lambda (tgt-sym)
-                                   (let* ((tgt-cell-stx (datum->syntax #'tgts tgt-sym))
-                                          (tgt-cell-access (get-cell-access-syntax-helper tgt-cell-stx)))
-                                     #`(make-effect 'set-value (cons #,tgt-cell-access v))))
-                                 tgt-list)))
-               (with-syntax ([pid #'pid]
-                             [src #'src]
-                             [(effect ...) effects])
-                 #'(propagator pid src -> src
-                               (lambda (v src-cell)
-                                 (if v
-                                     (cons #f (list effect ...))
-                                     (cons #f '()))))))))])))
+      [(_ pid src (tgt ...))
+       (with-syntax ([(effect ...) (map (lambda (t) #`(make-effect 'set-value (cons #,t v)))
+                                        (syntax->list #'(tgt ...)))])
+         #'(propagator pid src -> src
+                       (lambda (v src-cell)
+                         (if v
+                             (cons #f (list effect ...))
+                             (cons #f '())))))])))
 
-(define (make-cell-expr name-sym def-stx table-stx)
-  (syntax-case def-stx (Cell)
-    [(Cell id init)
-     (let ((cid-val (string->symbol (format #f "~a.~a" (syntax->datum name-sym) (syntax->datum #'id)))))
-       (with-syntax ([cid (datum->syntax #'id cid-val)])
-         #`(let ((c# (make-cell 'cid init)))
-             (hash-set! #,table-stx (quote id) c#)
-             c#)))]
-    [(Cell id init merge-fn)
-     (let ((cid-val (string->symbol (format #f "~a.~a" (syntax->datum name-sym) (syntax->datum #'id)))))
-       (with-syntax ([cid (datum->syntax #'id cid-val)])
-         #`(let ((c# (make-cell 'cid init merge-fn)))
-             (hash-set! #,table-stx (quote id) c#)
-             c#)))]
-    [_ (syntax-violation 'define-category "invalid cell definition" def-stx)]))
+(define-syntax-rule (define-object name) (begin))
 
-(define (make-prop-expr name-sym prop-stx table-stx)
-  (syntax-case prop-stx (prop ->)
-    ;; N:M
-    [((prop pid (src ...) -> (tgt ...)) fn)
-     (let ((pid-val (string->symbol (format #f "~a.~a" (syntax->datum name-sym) (syntax->datum #'pid)))))
-       (with-syntax ([pid (datum->syntax #'pid pid-val)]
-                     [(src-ref ...) (map (lambda (s) #`(hash-ref #,table-stx '#,s)) (syntax->list #'(src ...)))]
-                     [(tgt-ref ...) (map (lambda (s) #`(hash-ref #,table-stx '#,s)) (syntax->list #'(tgt ...)))])
-         #`(make-propagator 'pid (list src-ref ...) (list tgt-ref ...) fn)))]
-    ;; N:1
-    [((prop pid (src ...) -> tgt) fn)
-     (let ((pid-val (string->symbol (format #f "~a.~a" (syntax->datum name-sym) (syntax->datum #'pid)))))
-       (with-syntax ([pid (datum->syntax #'pid pid-val)]
-                     [(src-ref ...) (map (lambda (s) #`(hash-ref #,table-stx '#,s)) (syntax->list #'(src ...)))])
-         #`(make-propagator 'pid (list src-ref ...) (hash-ref #,table-stx 'tgt) fn)))]
-    ;; 1:N
-    [((prop pid src -> (tgt ...)) fn)
-     (let ((pid-val (string->symbol (format #f "~a.~a" (syntax->datum name-sym) (syntax->datum #'pid)))))
-       (with-syntax ([pid (datum->syntax #'pid pid-val)]
-                     [(tgt-ref ...) (map (lambda (s) #`(hash-ref #,table-stx '#,s)) (syntax->list #'(tgt ...)))])
-         #`(make-propagator 'pid (hash-ref #,table-stx 'src) (list tgt-ref ...) fn)))]
-    ;; 1:1
-    [((prop pid src -> tgt) fn)
-     (let ((pid-val (string->symbol (format #f "~a.~a" (syntax->datum name-sym) (syntax->datum #'pid)))))
-       (with-syntax ([pid (datum->syntax #'pid pid-val)])
-         #`(make-propagator 'pid
-                            (hash-ref #,table-stx (quote src))
-                            (hash-ref #,table-stx (quote tgt))
-                            fn)))]
-    [_ (syntax-violation 'define-category "invalid propagator definition" prop-stx)]))
+(define-syntax-rule (effect-scope cat-name-sym fn)
+  (lambda (v s)
+    (parameterize ((current-namespace cat-name-sym))
+      (fn v s))))
+
+(define-syntax create-instance-from-stx
+  (lambda (stx)
+    (syntax-case stx (instance)
+      ;; with merge function
+      [(_ name-sym (instance id type-name init merge-fn) table)
+       #`(let* ((name-str (symbol->string 'name-sym))
+               (id-sym 'id)
+               (type-sym 'type-name)
+               (init-val init)
+               (merge-fn merge-fn)
+               (cid-val (string->symbol (format #f "~a.~a" name-str id-sym)))
+               (c (make-cell cid-val type-sym init-val merge-fn)))
+          (hash-set! table id-sym c)
+          c)]
+      ;; without merge function
+      [(_ name-sym (instance id type-name init) table)
+       #`(let* ((name-str (symbol->string 'name-sym))
+               (id-sym 'id)
+               (type-sym 'type-name)
+               (init-val init)
+               (merge-fn default-merge-fn)
+               (cid-val (string->symbol (format #f "~a.~a" name-str id-sym)))
+               (c (make-cell cid-val type-sym init-val merge-fn)))
+          (hash-set! table id-sym c)
+          c)])))
+
+(define-syntax create-morphism-from-stx
+  (lambda (stx)
+    (syntax-case stx (morphism -> effect-scope)
+      ;; N:M
+      [(_ name-sym ((morphism pid (src ...) -> (tgt ...)) (effect-scope fn)) table)
+       #`(let* ((name-str (symbol->string 'name-sym))
+		(pid-sym 'pid)
+		(src-syms '(src ...))
+		(tgt-syms '(tgt ...))
+		(pid-val (string->symbol (format #f "~a.~a" name-str pid-sym)))
+		(src-cells (map (lambda (s) (or (hash-ref table s) (error "DSL: cell not found in category" s))) src-syms))
+		(tgt-cells (map (lambda (t) (or (hash-ref table t) (error "DSL: cell not found in category" t))) tgt-syms)))
+	   (make-propagator pid-val src-cells tgt-cells (effect-scope 'name-sym fn)))]
+      [(_ name-sym ((morphism pid (src ...) -> (tgt ...)) fn) table)
+       #`(let* ((name-str (symbol->string 'name-sym))
+		(pid-sym 'pid)
+		(src-syms '(src ...))
+		(tgt-syms '(tgt ...))
+		(pid-val (string->symbol (format #f "~a.~a" name-str pid-sym)))
+		(src-cells (map (lambda (s)
+                                (or (hash-ref table s)
+                                    (error "DSL: cell not found in category" s)))
+                              src-syms))
+		(tgt-cells (map (lambda (t)
+                                (or (hash-ref table t)
+                                    (error "DSL: cell not found in category" t)))
+                              tgt-syms)))
+	   (make-propagator pid-val src-cells tgt-cells fn))]
+      ;; N:1
+      [(_ name-sym ((morphism pid (src ...) -> tgt) (effect-scope fn)) table)
+       #`(let* ((name-str (symbol->string 'name-sym))
+		(pid-sym 'pid)
+		(src-syms '(src ...))
+		(tgt-sym 'tgt)
+		(pid-val (string->symbol (format #f "~a.~a" name-str pid-sym)))
+		(src-cells (map (lambda (s) (or (hash-ref table s) (error "DSL: cell not found in category" s))) src-syms))
+		(tgt-cell (or (hash-ref table tgt-sym) (error "DSL: cell not found in category" tgt-sym))))
+           (make-propagator pid-val src-cells tgt-cell (effect-scope 'name-sym fn)))]
+      [(_ name-sym ((morphism pid (src ...) -> tgt) fn) table)
+       #`(let* ((name-str (symbol->string 'name-sym))
+		(pid-sym 'pid)
+		(src-syms '(src ...))
+		(tgt-sym 'tgt)
+		(pid-val (string->symbol (format #f "~a.~a" name-str pid-sym)))
+		(src-cells (map (lambda (s)
+                                (or (hash-ref table s)
+                                    (error "DSL: cell not found in category" s)))
+                              src-syms))
+		(tgt-cell (or (hash-ref table tgt-sym)
+                              (error "DSL: cell not found in category" tgt-sym))))
+           (make-propagator pid-val src-cells tgt-cell fn))]
+      ;; 1:N
+      [(_ name-sym ((morphism pid src -> (tgt ...)) (effect-scope fn)) table)
+       #`(let* ((name-str (symbol->string 'name-sym))
+		(pid-sym 'pid)
+		(src-sym 'src)
+		(tgt-syms '(tgt ...))
+		(pid-val (string->symbol (format #f "~a.~a" name-str pid-sym)))
+		(src-cell (or (hash-ref table src-sym) (error "DSL: cell not found in category" src-sym)))
+		(tgt-cells (map (lambda (t) (or (hash-ref table t) (error "DSL: cell not found in category" t))) tgt-syms)))
+           (make-propagator pid-val src-cell tgt-cells (effect-scope 'name-sym fn)))]
+      [(_ name-sym ((morphism pid src -> (tgt ...)) fn) table)
+       #`(let* ((name-str (symbol->string 'name-sym))
+		(pid-sym 'pid)
+		(src-sym 'src)
+		(tgt-syms '(tgt ...))
+		(pid-val (string->symbol (format #f "~a.~a" name-str pid-sym)))
+		(src-cell (or (hash-ref table src-sym) (error "DSL: cell not found in category" src-sym)))
+		(tgt-cells (map (lambda (t) (or (hash-ref table t) (error "DSL: cell not found in category" t))) tgt-syms)))
+           (make-propagator pid-val src-cell tgt-cells fn))]
+      ;; 1:1
+      [(_ name-sym ((morphism pid src -> tgt) (effect-scope fn)) table)
+       #`(let* ((name-str (symbol->string 'name-sym))
+		(pid-sym 'pid)
+		(src-sym 'src)
+		(tgt-sym 'tgt)
+		(pid-val (string->symbol (format #f "~a.~a" name-str pid-sym)))
+		(src-cell (or (hash-ref table src-sym) (error "DSL: cell not found in category" src-sym)))
+		(tgt-cell (or (hash-ref table tgt-sym) (error "DSL: cell not found in category" tgt-sym))))
+           (make-propagator pid-val src-cell tgt-cell (effect-scope 'name-sym fn)))]
+      [(_ name-sym ((morphism pid src -> tgt) fn) table)
+       #`(let* ((name-str (symbol->string 'name-sym))
+		(pid-sym 'pid)
+		(src-sym 'src)
+		(tgt-sym 'tgt)
+		(pid-val (string->symbol (format #f "~a.~a" name-str pid-sym)))
+		(src-cell (or (hash-ref table src-sym) (error "DSL: cell not found in category" src-sym)))
+		(tgt-cell (or (hash-ref table tgt-sym) (error "DSL: cell not found in category" tgt-sym))))
+           (make-propagator pid-val src-cell tgt-cell fn))])))
 
 (define-syntax define-category
-  (lambda (stx)
-    (syntax-case stx (cells propagators)
-      ;; cells-only
-      [(_ name (cells cell-def ...))
-       (with-syntax
-           ([(cell-expr ...)
-             (map (lambda (def-stx) (make-cell-expr #'name def-stx #'table))
-                  (syntax->list #'(cell-def ...)))])
-         #'(define (name)
-             (let ((table (make-hash-table)))
-               (system-add-cell-table (current-system) (quote name) table)
-               (system-add-objects (current-system)
-                 (list cell-expr ...))
-               table)))]
-      ;; cells + propagators
-      [(_ name (cells cell-def ...) (propagators prop-def ...))
-       (with-syntax
-           ([(cell-expr ...)
-             (map (lambda (def-stx) (make-cell-expr #'name def-stx #'table))
-                  (syntax->list #'(cell-def ...)))]
-            [(prop-expr ...)
-             (map (lambda (prop-stx) (make-prop-expr #'name prop-stx #'table))
-                  (syntax->list #'(prop-def ...)))])
-         #'(define (name)
-             (let ((table (make-hash-table)))
-               (system-add-cell-table (current-system) (quote name) table)
-               (system-add-objects (current-system)
-                 (list cell-expr ...))
-               (system-add-morphisms (current-system)
-                 (list prop-expr ...))
-               table)))])))
+(lambda (stx)
+  (syntax-case stx (objects morphisms)
+    ;; objects-only
+    [(_ name (objects inst-def ...))
+     (with-syntax ([(tmp-obj ...) (generate-temporaries #'(inst-def ...))])
+       #'(define (name)
+           (let* ((sys (current-system))
+                  (net (system-get-net sys))
+                  (table (make-hash-table)))
+             (system-add-cell-table sys 'name table)
+             (let* ((tmp-obj (create-instance-from-stx name inst-def table)) ...)
+               (let ((objs (list tmp-obj ...)))
+                 (system-add-objects sys objs)
+                 (category-validate net)
+                 table)))))]
+    ;; objects + morphisms
+    [(_ name (objects inst-def ...) (morphisms mor-def ...))
+     (with-syntax ([(tmp-obj ...) (generate-temporaries #'(inst-def ...))]
+                   [(tmp-mor ...) (generate-temporaries #'(mor-def ...))])
+       #'(define (name)
+           (let* ((sys (current-system))
+                  (net (system-get-net sys))
+                  (table (make-hash-table)))
+             (system-add-cell-table sys 'name table)
+             (let* ((tmp-obj (create-instance-from-stx name inst-def table)) ...)
+               (let ((objs (list tmp-obj ...)))
+                 (system-add-objects sys objs)
+                 (let* ((tmp-mor (create-morphism-from-stx name mor-def table)) ...)
+                   (let ((mors (list tmp-mor ...)))
+                     (system-add-morphisms sys mors)
+                     (category-validate net)
+                     table)))))))])))
 
 (define-syntax define-connections
   (syntax-rules (propagator connector)
     [(_ name)
      (define (name)
-       (begin))]
+       (values))]
     [(_ name clause ...)
      (define (name)
        (begin clause ...))]))
 
-(define-syntax-rule (define-execution name . body)
+(define-syntax-rule (define-scenario name . body)
   (define (name) (begin . body)))
 
 (define-syntax define-cpnet-system
@@ -246,7 +300,7 @@
          #'(define name
              (let ((new-system (make-system q-name)))
                (parameterize ((current-system new-system))
-                 (begin . body))
+                 ((lambda () . body)))
                new-system)))])))
 
 (define (add-subsystem! target-system source-system)
@@ -259,7 +313,7 @@
       (for-each
        (lambda (old-cell)
          (let* ((new-id (string->symbol (format #f "~a.~a" source-prefix (cell-id old-cell))))
-                (new-cell (make-cell new-id (cell-value old-cell) (cell-merge-fn old-cell))))
+                (new-cell (make-cell new-id (cell-type old-cell) (cell-value old-cell) (cell-merge-fn old-cell))))
            (hash-set! old->new-cell-map old-cell new-cell)))
        (category-objects source-net))
       (system-add-objects target-system (hash-map->list (lambda (k v) v) old->new-cell-map)))
@@ -267,16 +321,19 @@
     (let ((source-net (system-get-net source-system)))
       (for-each
        (lambda (old-mor)
-         (let* ((new-dom (hash-ref old->new-cell-map (arrow-dom old-mor) #f))
-                (new-cod (hash-ref old->new-cell-map (arrow-cod old-mor) #f))
-                (old-fn (arrow-fn old-mor))
-                (new-fn (lambda (v new-source-cell)
-                          (parameterize ((current-namespace source-prefix))
-                            (old-fn v new-source-cell))))
-                (new-mor-id (string->symbol (format #f "~a.~a" source-prefix (arrow-id old-mor)))))
-           (if (and new-dom new-cod)
-               (let ((new-mor (make-propagator new-mor-id new-dom new-cod new-fn)))
-                 (system-add-morphisms target-system new-mor))
+         (let* ((map-one (lambda (c) (hash-ref old->new-cell-map c #f)))
+                (old-dom (arrow-dom old-mor))
+                (old-cod (arrow-cod old-mor))
+                (new-dom (map-maybe map-one old-dom))
+                (new-cod (map-maybe map-one old-cod)))
+           (if (and new-dom (if (list? new-dom) (not (member #f new-dom)) #t)
+                    new-cod (if (list? new-cod) (not (member #f new-cod)) #t))
+               (let* ((old-fn (arrow-fn old-mor))
+                      (new-fn (lambda (v new-source-cell)
+                                (parameterize ((current-namespace source-prefix))
+                                  (old-fn v new-source-cell))))
+                      (new-mor-id (string->symbol (format #f "~a.~a" source-prefix (arrow-id old-mor)))))
+                 (system-add-morphisms target-system (list (make-propagator new-mor-id new-dom new-cod new-fn (arrow-priority old-mor)))))
                (format (current-error-port) "Warning: could not map morphism ~a during subsystem merge.\n" (arrow-id old-mor)))))
        (category-morphisms source-net)))
 
@@ -302,42 +359,69 @@
                  (list sys ...))
        (parameterize ((current-system new-system))
          (begin conn-proc ...)
-         (for-each (lambda (proc) (proc)) (list (lambda () (begin . exec-procs)))))
+         (begin . exec-procs))
        new-system)]))
 
 
-(define-syntax trigger
-  (lambda (stx)
-    (syntax-case stx ()
-      [(_ cell-name-stx val)
-       (with-syntax ([cell-access (get-cell-access-syntax-helper #'cell-name-stx)])
-         #'(let ((c cell-access))
-             (cell-set-value! c val)))])))
+(define-syntax-rule (trigger cell-expr val)
+  (cell-set-value! cell-expr val))
 
-(define-syntax-rule (run)
-  (runtime-settle! (current-system)))
+(define-syntax run
+  (lambda (stx)
+    #'(runtime-settle! (current-system))))
 
 (define-syntax-rule (show-state msg)
   (runtime-show-state (current-system) msg))
 
-(define-syntax-rule (apply-functor-as-connections F)
-  (let ((functor F))
-    (let ((src-cat (functor-src-cat functor)))
-      (for-each
-       (lambda (src-obj)
-         (let ((tgt-obj ((functor-obj-map functor) src-obj)))
-           (when tgt-obj ;; if there is a mapping
-             (system-add-morphisms
-              (current-system)
-              (list
-               (make-propagator
-                (string->symbol (format #f "functor-conn-~a->~a"
-                                        (cell-id src-obj)
-                                        (cell-id tgt-obj)))
-                src-obj
-                tgt-obj
-                (lambda (v _) (cons v '()))))))))
-       (category-objects src-cat)))))
+(define-syntax-rule (visualize path)
+  (system->dot (current-system) path))
+
+(define-syntax apply-functor-as-connections
+  (syntax-rules (mappings ->)
+    [(_ F (mappings (src -> tgt fn) ...))
+     (let ((functor F))
+       (let ((src-cat (functor-src-cat functor))
+             (tgt-cat (functor-tgt-cat functor))
+             (sys (current-system)))
+         ;; Verify that the implementation mappings are consistent with the functor definition
+         (let* ((clauses (list (cons 'src 'tgt) ...))
+                (src-cat-name (system-find-category-name-for-cat sys src-cat))
+                (tgt-cat-name (system-find-category-name-for-cat sys tgt-cat)))
+           (for-each
+            (lambda (clause)
+              (let* ((src-name (car clause))
+                     (tgt-name (cdr clause))
+                     (src-cell (system-find-cell sys src-cat-name src-name))
+                     (tgt-cell (system-find-cell sys tgt-cat-name tgt-name))
+                     (mapped-tgt-cell ((functor-obj-map functor) src-cell)))
+                (unless (eq? tgt-cell mapped-tgt-cell)
+                  (error "Inconsistent mapping in apply-functor-as-connections"
+                         (format #f "Functor maps ~a to ~a, but implementation connects to ~a"
+                                 src-name (cell-id mapped-tgt-cell) (cell-id tgt-cell))))))
+            clauses))
+         ;; If consistent, create the propagators
+         (for-each
+          (lambda (src-obj)
+            (let* ((src-id (cell-id src-obj))
+                   (tgt-obj ((functor-obj-map functor) src-obj)))
+              (when tgt-obj
+                (let* ((clauses (list (cons 'src fn) ...))
+                       (full-id-str (symbol->string src-id))
+                       (parts (string-split full-id-str #\.))
+                       (short-id-sym (string->symbol (car (last-pair parts))))
+                       (found (assoc short-id-sym clauses)))
+                  (when found
+                    (system-add-morphisms
+                     (current-system)
+                     (list
+                      (make-propagator
+                       (string->symbol (format #f "functor-conn-~a->~a"
+                                               (cell-id src-obj)
+                                               (cell-id tgt-obj)))
+                       src-obj
+                       tgt-obj
+                       (cdr found)))))))))
+          (category-objects src-cat))))]))
 
 (define-syntax define-functor
   (syntax-rules ()
@@ -348,82 +432,111 @@
      (define name
        (let* ((C   (from-cat)) ; 실제 카테고리 인스턴스
               (D   (to-cat))
-              (F   (make-functor C D obj-fn mor-fn)))
+              (F   (make-functor-record C D obj-fn mor-fn)))
          ;; 공리 검증
          (for-each
           (lambda (a)
-            ;; 단위 보존: F(id_x) = id_{F x}
-            (unless (equal? (functor-map-morphism F (identity-morphism C a))
-                            (identity-morphism D (obj-fn a)))
-              (error 'functor-validate
-                     (format #f "Functor ~a fails unit law at object ~a" 'name a))))
-          (category-objects C))
-         (for-each
-          (lambda (f)
-            (let* ((g   (identity-morphism C (codomain-of f)))
-                   (lhs (functor-map-morphism F (compose-morphisms C g f)))
-                   (rhs (compose-morphisms D
-					   (functor-map-morphism F g)
-					   (functor-map-morphism F f))))
-              ;; 합성 보존
-              (unless (equal? lhs rhs)
+            ;; 단위 보존: F(id_x) = id_{F(x)}
+            (let ((id-a ((category-id-fn C) a))
+                  (mapped-id-a (mor-fn id-a))
+                  (id-fa ((category-id-fn D) (obj-fn a))))
+              (unless ((category-equal-fn D) mapped-id-a id-fa)
                 (error 'functor-validate
-                       (format #f "Functor ~a fails comp law at morphism ~a" 'name f)))))
-          (category-morphisms C))
+                       (format #f "Functor ~a fails unit law at object ~a" 'name a)))))
+          (category-objects C))
+         (let ((all-morphisms (category-morphisms C)))
+           (for-each
+            (lambda (f)
+              (for-each
+               (lambda (g)
+                 (when (equal? (arrow-cod f) (arrow-dom g))
+                   (let* ((comp-gf (category-compose C g f))
+                          (mapped-comp (mor-fn comp-gf))
+                          (mapped-g (mor-fn g))
+                          (mapped-f (mor-fn f))
+                          (comp-mapped (category-compose D mapped-g mapped-f)))
+                     (unless ((category-equal-fn D) mapped-comp comp-mapped)
+                       (error 'functor-validate
+                              (format #f "Functor ~a fails composition law on f=~a, g=~a"
+                                      'name f g))))))
+               all-morphisms))
+            all-morphisms))
          F))]))
 
-(define-syntax define-system-functor
+(define-syntax make-system-functor
   (syntax-rules (from to mappings ->)
-    [(_ name (from src-cat-name) (to tgt-cat-name) (mappings (src-cell-name -> tgt-cell-name) ...))
-     (define name
-       (let* ((sys (current-system))
-              (tables (system-get-cell-tables sys))
-              (src-cat-table (hash-ref tables 'src-cat-name))
-              (tgt-cat-table (hash-ref tables 'tgt-cat-name))
+    [(_ (from src-cat-name) (to tgt-cat-name) (mappings (src-cell-name -> tgt-cell-name) ...))
+     (let* ((sys (current-system))
+            (tables (system-get-cell-tables sys))
+            (src-cat-table (hash-ref tables 'src-cat-name))
+            (tgt-cat-table (hash-ref tables 'tgt-cat-name))
 
-              (src-objs (hash-map->list (lambda (k v) v) src-cat-table))
-              (tgt-objs (hash-map->list (lambda (k v) v) tgt-cat-table))
-              (all-mors (category-morphisms (system-get-net sys)))
+            (src-objs (if src-cat-table (hash-map->list (lambda (k v) v) src-cat-table) '()))
+            (tgt-objs (if tgt-cat-table (hash-map->list (lambda (k v) v) tgt-cat-table) '()))
+            (all-mors (category-morphisms (system-get-net sys)))
 
-              (src-mors (filter (lambda (m)
-                                  (and (member (arrow-dom m) src-objs)
-                                       (member (arrow-cod m) src-objs)))
-                                all-mors))
-              (tgt-mors (filter (lambda (m)
-                                  (and (member (arrow-dom m) tgt-objs)
-                                       (member (arrow-cod m) tgt-objs)))
-                                all-mors))
+            (src-mors (filter (lambda (m)
+                                (let ((dom (arrow-dom m)) (cod (arrow-cod m)))
+                                  (and (if (list? dom) (every (lambda (c) (member c src-objs)) dom) (member dom src-objs))
+                                       (if (list? cod) (every (lambda (c) (member c src-objs)) cod) (member cod src-objs)))))
+                              all-mors))
+            (tgt-mors (filter (lambda (m)
+                                (let ((dom (arrow-dom m)) (cod (arrow-cod m)))
+                                  (and (if (list? dom) (every (lambda (c) (member c tgt-objs)) dom) (member dom tgt-objs))
+                                       (if (list? cod) (every (lambda (c) (member c tgt-objs)) cod) (member cod tgt-objs)))))
+                              all-mors))
 
-              (src-cat (make-cpnet-category src-objs src-mors))
-              (tgt-cat (make-cpnet-category tgt-objs tgt-mors))
+            (src-cat (make-cpnet-category src-objs src-mors))
+            (tgt-cat (make-cpnet-category tgt-objs tgt-mors))
 
-              (cell-map (list
-                         (cons (system-find-cell sys 'src-cat-name 'src-cell-name)
-                               (system-find-cell sys 'tgt-cat-name 'tgt-cell-name))
-                         ...))
-              )
-         (make-cpnet-functor src-cat tgt-cat cell-map)))]))
+            (cell-map (list
+                       (cons (system-find-cell sys 'src-cat-name 'src-cell-name)
+                             (system-find-cell sys 'tgt-cat-name 'tgt-cell-name))
+                       ...)))
+       (make-cpnet-functor src-cat tgt-cat cell-map))]))
 
 (define-syntax define-nt
-  (syntax-rules ()
-    [(_ name F G (component obj fn) ...)
+  (syntax-rules (component)
+    [(_ name F G (component obj-name mor-name) ...)
      (define name
-       (let ((η (make-nt-record F G (list (cons 'obj fn) ...))))
-         ;; 자연성 사각형 검증
-         (for-each
-          (lambda (f)
-            (let* ((x   (domain-of f))
-                   (y   (codomain-of f))
-                   (ηx  (nt-component η x))
-                   (ηy  (nt-component η y))
-                   (lhs (compose-morphisms (functor-target G)
-					   (functor-map-morphism G f)
-					   ηx))
-                   (rhs (compose-morphisms (functor-target F)
-					   ηy
-					   (functor-map-morphism F f))))
-              (unless (equal? lhs rhs)
-                (error 'nt-validate
-                       (format #f "NT ~a fails naturality at morphism ~a" 'name f)))))
-          (category-morphisms (functor-source F)))
-         η))]))
+       (let ((nt-F F) (nt-G G))
+         (let* ((C (functor-src-cat nt-F))
+                (D (functor-tgt-cat nt-F))
+                (components-alist
+                 (let ((obj-map (make-hash-table)))
+                   (for-each
+                    (lambda (o)
+                      (let* ((full-id-str (symbol->string (cell-id o)))
+                             (parts (string-split full-id-str #\.))
+                             (short-id-sym (string->symbol (car (last-pair parts)))))
+                        (hash-set! obj-map short-id-sym o)))
+                    (category-objects C))
+                   (list
+                    (let* ((obj-name 'obj-name)
+                           (mor-name 'mor-name)
+                           (obj (hash-ref obj-map obj-name))
+                           (mor (category-find-morphism-by-suffix D mor-name)))
+                      (if (and obj mor)
+                          (cons obj mor)
+                          (error 'define-nt "Cannot find object or morphism for component" obj-name mor-name))) ...)))
+                (η (make-nt-record nt-F nt-G components-alist)))
+           ;; 자연성 사각형 검증
+           (for-each
+            (lambda (f)
+              (let* ((x (arrow-dom f))
+                     (y (arrow-cod f))
+                     (ηx-pair (assoc x (nt-components η)))
+                     (ηy-pair (assoc y (nt-components η))))
+                (when (and ηx-pair ηy-pair)
+                  (let ((ηx (cdr ηx-pair))
+                        (ηy (cdr ηy-pair))
+                        (Gf ((functor-mor-map nt-G) f))
+                        (Ff ((functor-mor-map nt-F) f)))
+                    (when (and Gf Ff)
+                      (let ((lhs (category-compose D Gf ηx))
+                            (rhs (category-compose D ηy Ff)))
+                        (unless ((category-equal-fn D) lhs rhs)
+                          (error 'nt-validate
+                                 (format #f "NT ~a fails naturality at morphism ~a" 'name f)))))))))
+            (category-morphisms C))
+           η)))]))

@@ -1,5 +1,7 @@
 (define-module (cpnet system)
+  #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-9)
+  #:use-module (ice-9 hash-table)
   #:use-module ((cpnet core) :prefix core:)
   #:use-module ((cpnet category) :prefix cat:)
   #:export (make-system
@@ -10,7 +12,8 @@
             system-add-cell-table
             system-find-cell
             system-add-objects
-            system-add-morphisms))
+            system-add-morphisms
+            system-find-category-name-for-cat))
 
 (define-record-type <cpnet-system>
   (make-system-record name net cell-tables)
@@ -42,7 +45,24 @@
   (hash-set! (system-get-cell-tables system) cat-name table))
 
 (define (system-find-cell system cat-name cell-name)
-  (let ((cat-table (hash-ref (system-get-cell-tables system) cat-name)))
+  (let* ((tables (system-get-cell-tables system))
+         (cat-table (hash-ref tables cat-name #f)))
     (if cat-table
         (hash-ref cat-table cell-name #f)
+        #f)))
+
+(define (system-find-category-name-for-cat system cat)
+  (let* ((tables (system-get-cell-tables system))
+         (cat-objs (cat:category-objects cat))
+         (found-pair (find (lambda (pair)
+                             (let* ((cat-name (car pair))
+                                    (table (cdr pair))
+                                    (table-cells (hash-map->list (lambda (k v) v) table)))
+                               (if (null? cat-objs)
+                                   (null? table-cells)
+                                   (and (= (length cat-objs) (length table-cells))
+                                        (null? (lset-difference eq? cat-objs table-cells))))))
+                           (hash-map->list cons tables))))
+    (if found-pair
+        (car found-pair)
         #f)))

@@ -22,6 +22,8 @@
 	    category-remove-morphism
             category-has-object?
             category-has-morphism?
+            category-find-morphism-by-id
+            category-find-morphism-by-suffix
 
 	    make-arrow
 	    arrow?
@@ -29,6 +31,7 @@
 	    arrow-dom
 	    arrow-cod
 	    arrow-fn
+	    arrow-priority
 	    ))
 
 (define-record-type <category>
@@ -44,12 +47,16 @@
   (mors _category-morphisms-h))
 
 (define-record-type <arrow>
-  (make-arrow id dom cod fn)
+  (make-arrow-internal id dom cod fn priority)
   arrow?
   (id arrow-id)
   (dom arrow-dom)
   (cod arrow-cod)
-  (fn arrow-fn))
+  (fn arrow-fn)
+  (priority arrow-priority))
+
+(define (make-arrow id dom cod fn . priority)
+  (make-arrow-internal id dom cod fn (if (null? priority) 0 (car priority))))
 
 (define (category-objects cat)
   (hash-map->list (lambda (k v) k) (_category-objects-h cat)))
@@ -61,6 +68,20 @@
 
 (define (category-has-morphism? cat m)
   (hash-ref (_category-morphisms-h cat) ((category-mor-id-fn cat) m) #f))
+
+(define (category-find-morphism-by-id cat mor-id)
+  (hash-ref (_category-morphisms-h cat) mor-id #f))
+
+(define (category-find-morphism-by-suffix cat suffix-sym)
+  (let* ((all-mors (category-morphisms cat))
+         (suffix-str (symbol->string suffix-sym))
+         (found-mors (filter (lambda (m)
+                               (string-suffix? suffix-str (symbol->string (arrow-id m))))
+                             all-mors)))
+    (cond
+     ((null? found-mors) #f)
+     ((= 1 (length found-mors)) (car found-mors))
+     (else (error "ambiguous morphism suffix" suffix-sym)))))
 
 (define (make-category dom-fn cod-fn compose-fn id-fn equal-fn mor-id-fn obj-list mor-list)
   (let ((objs (make-hash-table))
@@ -110,11 +131,12 @@
         (eq-fn   (category-equal-fn   cat))
         (comp-fn (category-compose-fn cat)))
     (if (equal? (cod f) (dom g))
-        (if (eq-fn f (id-fn (dom f)))
-            g
-            (if (eq-fn g (id-fn (dom g)))
-                f
-                (comp-fn g f)))
+        (let ((f-dom (dom f)) (g-dom (dom g)))
+          (if (and f-dom (not (list? f-dom)) (eq-fn f (id-fn f-dom)))
+              g
+              (if (and g-dom (not (list? g-dom)) (eq-fn g (id-fn g-dom)))
+                  f
+                  (comp-fn g f))))
         (error "category-compose: cod(f) is not equal to dom(g)" f g))))
 
 (define (category-validate cat)
@@ -126,12 +148,17 @@
          (morphs-h  (_category-morphisms-h cat)))
     (hash-for-each
      (lambda (_ f)
-       (let ((l (comp f (id (dom f))))
-             (r (comp (id (cod f)) f)))
-         (unless (and (equal-fn l f)
-                      (equal-fn r f))
-           (error 'category-validate
-                  (format #f "Unit law violation for morphism ~a" f)))))
+       (let ((f-dom (dom f))
+             (f-cod (cod f)))
+         (when (and f-dom f-cod
+                    (not (list? f-dom))
+                    (not (list? f-cod)))
+           (let ((l (comp f (id f-dom)))
+                 (r (comp (id f-cod) f)))
+             (unless (and (equal-fn l f)
+                          (equal-fn r f))
+               (error 'category-validate
+                      (format #f "Unit law violation for morphism ~a" f)))))))
      morphs-h)
     (let ((all-arrows (hash-map->list (lambda (_ v) v) morphs-h)))
       (for-each
