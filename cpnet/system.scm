@@ -13,19 +13,28 @@
             system-find-cell
             system-add-objects
             system-add-morphisms
-            system-find-category-name-for-cat))
+            system-find-category-name-for-cat
+            system-functors
+            system-nts
+            system-add-functor!
+            system-add-nt!
+            ))
 
 (define-record-type <cpnet-system>
-  (make-system-record name net cell-tables)
+  (make-system-record name net cell-tables functors nts)
   system?
   (name system-name)
   (net system-get-net)
-  (cell-tables system-get-cell-tables))
+  (cell-tables system-get-cell-tables)
+  (functors system-functors system-set-functors!)
+  (nts system-nts system-set-nts!))
 
 (define (make-system . name)
   (make-system-record (if (null? name) #f (car name))
                       (core:make-cpnet-category '() '())
-                      (make-hash-table)))
+                      (make-hash-table)
+                      '()
+                      '()))
 
 (define (system-add-objects system . objects)
   (let ((net (system-get-net system))
@@ -66,3 +75,9 @@
     (if found-pair
         (car found-pair)
         #f)))
+
+(define (system-add-functor! system functor)
+  (system-set-functors! system (cons functor (system-functors system))))
+
+(define (system-add-nt! system nt)
+  (system-set-nts! system (cons nt (system-nts system))))

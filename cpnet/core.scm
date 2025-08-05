@@ -150,7 +150,7 @@
       (cons (cell-value cell) '())
       (cons (apply min new-vals) '())))
 
-(define (make-cpnet-functor src-cat tgt-cat cell-map)
+(define (make-cpnet-functor name src-cat tgt-cat cell-map)
   (let* ((F0 (lambda (obj)
                (let ((pair (assoc obj cell-map)))
                  (if pair
@@ -164,5 +164,5 @@
                      (let ((new-dom (map-maybe F0 (cat:arrow-dom p)))
                            (new-cod (map-maybe F0 (cat:arrow-cod p))))
                        (make-propagator id new-dom new-cod (cat:arrow-fn p))))))))
-    (fun:make-functor-record src-cat tgt-cat F0 F1)))
+    (fun:make-functor-record name src-cat tgt-cat F0 F1)))
 

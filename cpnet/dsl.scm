@@ -409,13 +409,15 @@
                        (full-id-str (symbol->string src-id))
                        (parts (string-split full-id-str #\.))
                        (short-id-sym (string->symbol (car (last-pair parts))))
-                       (found (assoc short-id-sym clauses)))
+                       (found (assoc short-id-sym clauses))
+                       (functor-name (functor-name functor)))
                   (when found
                     (system-add-morphisms
                      (current-system)
                      (list
                       (make-propagator
-                       (string->symbol (format #f "functor-conn-~a->~a"
+                       (string->symbol (format #f "functor-conn-~a-~a->~a"
+                                               (if functor-name functor-name "anon")
                                                (cell-id src-obj)
                                                (cell-id tgt-obj)))
                        src-obj
@@ -464,36 +466,61 @@
          F))]))
 
 (define-syntax make-system-functor
-  (syntax-rules (from to mappings ->)
+  (syntax-rules (name from to mappings ->)
+    [(_ (name functor-name) (from src-cat-name) (to tgt-cat-name) (mappings (src-cell-name -> tgt-cell-name) ...))
+     (let ((functor (let* ((sys (current-system))
+                           (tables (system-get-cell-tables sys))
+                           (src-cat-table (hash-ref tables 'src-cat-name))
+                           (tgt-cat-table (hash-ref tables 'tgt-cat-name))
+                           (src-objs (if src-cat-table (hash-map->list (lambda (k v) v) src-cat-table) '()))
+                           (tgt-objs (if tgt-cat-table (hash-map->list (lambda (k v) v) tgt-cat-table) '()))
+                           (all-mors (category-morphisms (system-get-net sys)))
+                           (src-mors (filter (lambda (m)
+                                               (let ((dom (arrow-dom m)) (cod (arrow-cod m)))
+                                                 (and (if (list? dom) (every (lambda (c) (member c src-objs)) dom) (member dom src-objs))
+                                                      (if (list? cod) (every (lambda (c) (member c src-objs)) cod) (member cod src-objs)))))
+                                             all-mors))
+                           (tgt-mors (filter (lambda (m)
+                                               (let ((dom (arrow-dom m)) (cod (arrow-cod m)))
+                                                 (and (if (list? dom) (every (lambda (c) (member c tgt-objs)) dom) (member dom tgt-objs))
+                                                      (if (list? cod) (every (lambda (c) (member c tgt-objs)) cod) (member cod tgt-objs)))))
+                                             all-mors))
+                           (src-cat (make-cpnet-category src-objs src-mors))
+                           (tgt-cat (make-cpnet-category tgt-objs tgt-mors))
+                           (cell-map (list
+                                      (cons (system-find-cell sys 'src-cat-name 'src-cell-name)
+                                            (system-find-cell sys 'tgt-cat-name 'tgt-cell-name))
+                                      ...)))
+                      (make-cpnet-functor 'functor-name src-cat tgt-cat cell-map))))
+       (system-add-functor! (current-system) functor)
+       functor)]
     [(_ (from src-cat-name) (to tgt-cat-name) (mappings (src-cell-name -> tgt-cell-name) ...))
-     (let* ((sys (current-system))
-            (tables (system-get-cell-tables sys))
-            (src-cat-table (hash-ref tables 'src-cat-name))
-            (tgt-cat-table (hash-ref tables 'tgt-cat-name))
-
-            (src-objs (if src-cat-table (hash-map->list (lambda (k v) v) src-cat-table) '()))
-            (tgt-objs (if tgt-cat-table (hash-map->list (lambda (k v) v) tgt-cat-table) '()))
-            (all-mors (category-morphisms (system-get-net sys)))
-
-            (src-mors (filter (lambda (m)
-                                (let ((dom (arrow-dom m)) (cod (arrow-cod m)))
-                                  (and (if (list? dom) (every (lambda (c) (member c src-objs)) dom) (member dom src-objs))
-                                       (if (list? cod) (every (lambda (c) (member c src-objs)) cod) (member cod src-objs)))))
-                              all-mors))
-            (tgt-mors (filter (lambda (m)
-                                (let ((dom (arrow-dom m)) (cod (arrow-cod m)))
-                                  (and (if (list? dom) (every (lambda (c) (member c tgt-objs)) dom) (member dom tgt-objs))
-                                       (if (list? cod) (every (lambda (c) (member c tgt-objs)) cod) (member cod tgt-objs)))))
-                              all-mors))
-
-            (src-cat (make-cpnet-category src-objs src-mors))
-            (tgt-cat (make-cpnet-category tgt-objs tgt-mors))
-
-            (cell-map (list
-                       (cons (system-find-cell sys 'src-cat-name 'src-cell-name)
-                             (system-find-cell sys 'tgt-cat-name 'tgt-cell-name))
-                       ...)))
-       (make-cpnet-functor src-cat tgt-cat cell-map))]))
+     (let ((functor (let* ((sys (current-system))
+                           (tables (system-get-cell-tables sys))
+                           (src-cat-table (hash-ref tables 'src-cat-name))
+                           (tgt-cat-table (hash-ref tables 'tgt-cat-name))
+                           (src-objs (if src-cat-table (hash-map->list (lambda (k v) v) src-cat-table) '()))
+                           (tgt-objs (if tgt-cat-table (hash-map->list (lambda (k v) v) tgt-cat-table) '()))
+                           (all-mors (category-morphisms (system-get-net sys)))
+                           (src-mors (filter (lambda (m)
+                                               (let ((dom (arrow-dom m)) (cod (arrow-cod m)))
+                                                 (and (if (list? dom) (every (lambda (c) (member c src-objs)) dom) (member dom src-objs))
+                                                      (if (list? cod) (every (lambda (c) (member c src-objs)) cod) (member cod src-objs)))))
+                                             all-mors))
+                           (tgt-mors (filter (lambda (m)
+                                               (let ((dom (arrow-dom m)) (cod (arrow-cod m)))
+                                                 (and (if (list? dom) (every (lambda (c) (member c tgt-objs)) dom) (member dom tgt-objs))
+                                                      (if (list? cod) (every (lambda (c) (member c tgt-objs)) cod) (member cod tgt-objs)))))
+                                             all-mors))
+                           (src-cat (make-cpnet-category src-objs src-mors))
+                           (tgt-cat (make-cpnet-category tgt-objs tgt-mors))
+                           (cell-map (list
+                                      (cons (system-find-cell sys 'src-cat-name 'src-cell-name)
+                                            (system-find-cell sys 'tgt-cat-name 'tgt-cell-name))
+                                      ...)))
+                      (make-cpnet-functor #f src-cat tgt-cat cell-map))))
+       (system-add-functor! (current-system) functor)
+       functor)]))
 
 (define-syntax define-nt
   (syntax-rules (component)
@@ -519,7 +546,7 @@
                       (if (and obj mor)
                           (cons obj mor)
                           (error 'define-nt "Cannot find object or morphism for component" obj-name mor-name))) ...)))
-                (η (make-nt-record nt-F nt-G components-alist)))
+                (η (make-nt-record 'name nt-F nt-G components-alist)))
            ;; 자연성 사각형 검증
            (for-each
             (lambda (f)
@@ -539,4 +566,5 @@
                           (error 'nt-validate
                                  (format #f "NT ~a fails naturality at morphism ~a" 'name f)))))))))
             (category-morphisms C))
+           (system-add-nt! (current-system) η)
            η)))]))
