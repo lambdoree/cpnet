@@ -13,11 +13,15 @@
             system-find-cell
             system-add-objects
             system-add-morphisms
+            system-add-propagator!
+            system-get-category-table
+            system-find-propagator
             system-find-category-name-for-cat
             system-functors
             system-nts
             system-add-functor!
             system-add-nt!
+            system-add-branch-propagator
             ))
 
 (define-record-type <cpnet-system>
@@ -60,6 +64,24 @@
         (hash-ref cat-table cell-name #f)
         #f)))
 
+
+(define (system-add-propagator! system propagator)
+  (system-add-morphisms system propagator))
+
+(define (system-get-category-table system cat-name)
+  (hash-ref (system-get-cell-tables system) cat-name #f))
+
+(define (system-find-propagator system cat-name prop-name)
+  (let* ((net (system-get-net system))
+         (mangled-id-str (if cat-name
+                             (format #f "~a.~a" cat-name prop-name)
+                             (symbol->string prop-name)))
+         (mangled-id (string->symbol mangled-id-str))
+         (prop (cat:category-find-morphism-by-id net mangled-id)))
+    (if prop
+        prop
+        (cat:category-find-morphism-by-suffix net prop-name))))
+
 (define (system-find-category-name-for-cat system cat)
   (let* ((tables (system-get-cell-tables system))
          (cat-objs (cat:category-objects cat))
@@ -81,3 +103,17 @@
 
 (define (system-add-nt! system nt)
   (system-set-nts! system (cons nt (system-nts system))))
+
+(define (system-add-branch-propagator sys cat-name cond-name then-name else-name result-name)
+  (let* ((table (system-get-category-table sys cat-name))
+         (c (and table (hash-ref table cond-name #f)))
+         (t (and table (hash-ref table then-name #f)))
+         (e (and table (hash-ref table else-name #f)))
+         (r (and table (hash-ref table result-name #f)))
+         (id (string->symbol (format #f "branch-~a" (gensym)))))
+    (if (and c t e r)
+        (system-add-propagator! sys
+          (core:make-branch-propagator id c t e r))
+        (error "system-add-branch-propagator: cell not found"
+               (list cat-name cond-name then-name else-name result-name)))))
+

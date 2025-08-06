@@ -32,10 +32,50 @@
             max-merge-fn
             min-merge-fn
             map-maybe
+            make-branch-propagator
+            category-builder?
+            make-category-builder
+            builder-name
+            builder-function
+            *builder-registry*
+            register-builder
+            get-builder
             ))
+
+(define-record-type <category-builder>
+  (make-category-builder name builder-proc)
+  category-builder?
+  (name builder-name)
+  (builder-proc builder-function))
+
+(define *builder-registry* (make-hash-table))
+(define (register-builder cb)
+  (hash-set! *builder-registry* (builder-name cb) cb))
+(define (get-builder name)
+  (hash-ref *builder-registry* name
+            (lambda () (error "Unknown category:" name))))
+
+(define-syntax-rule (define-object name) (begin))
+
+(define-object Code)
+(define-object category-builder)
 
 (define (map-maybe f x)
   (if (list? x) (map f x) (f x)))
+
+(define (make-branch-propagator id cond-cell then-cell else-cell result-cell)
+  (make-propagator
+   id
+   (list cond-cell then-cell else-cell)
+   result-cell
+   (lambda (vals _)
+     (let ((p? (list-ref vals 0))
+           (x  (list-ref vals 1))
+           (y  (list-ref vals 2)))
+       (cond
+        ((eq? p? #t) (cons x '()))
+        ((eq? p? #f) (cons y '()))
+        (else (cons *nothing* '())))))))
 
 (define-record-type <cell>
   (make-cell-record id type value merge-fn system)
@@ -81,7 +121,9 @@
   c)
 
 (define (make-propagator id src tgt fn . priority)
-  (apply cat:make-arrow id src tgt fn priority))
+  (let ((real-src (if (and (list? src) (= 1 (length src)) (not (cell? (car src)))) (car src) src))
+        (real-tgt (if (and (list? tgt) (= 1 (length tgt)) (not (cell? (car tgt)))) (car tgt) tgt)))
+   (apply cat:make-arrow id real-src real-tgt fn priority)))
 
 (define propagator? cat:arrow?)
 

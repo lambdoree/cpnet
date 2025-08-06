@@ -150,25 +150,30 @@
       (hash-for-each
        (lambda (sys-name cat-names)
          (when sys-name ; not toplevel
-           (format port "  subgraph \"cluster_~a\" {\n" sys-name)
-           (format port "    label = \"~a\";\n" sys-name)
-           (format port "    style=filled;\n")
-           (format port "    color=whitesmoke;\n")
-           ;; Draw internal categories
-           (for-each
-            (lambda (cat-name)
-              (draw-category-cluster cat-name (hash-ref cell-tables cat-name)
-                                     port all-mors nt-components-map drawn-mors "    "))
-            (reverse cat-names))
-           ;; Draw system-level propagators
-           (let ((sys-mors (reverse (hash-ref morphisms-by-system sys-name '()))))
+           (let* ((sys-name-str (symbol->string sys-name))
+                  (is-engine (string-suffix? "-engine" sys-name-str))
+                  (label (if is-engine (string-drop-right sys-name-str 7) sys-name-str)))
+             (format port "  subgraph \"cluster_~a\" {\n" sys-name)
+             (format port "    label = \"~a\";\n" label)
+             (format port "    style=filled;\n")
+             (if is-engine
+                 (format port "    color=lightblue;\n")
+                 (format port "    color=whitesmoke;\n"))
+             ;; Draw internal categories
              (for-each
-              (lambda (mor)
-                (unless (hash-ref drawn-mors (cat:arrow-id mor) #f)
-                  (draw-propagator mor port nt-components-map "    ")
-                  (hash-set! drawn-mors (cat:arrow-id mor) #t)))
-              sys-mors))
-           (format port "  }\n")))
+              (lambda (cat-name)
+                (draw-category-cluster cat-name (hash-ref cell-tables cat-name)
+                                       port all-mors nt-components-map drawn-mors "    "))
+              (reverse cat-names))
+             ;; Draw system-level propagators
+             (let ((sys-mors (reverse (hash-ref morphisms-by-system sys-name '()))))
+               (for-each
+                (lambda (mor)
+                  (unless (hash-ref drawn-mors (cat:arrow-id mor) #f)
+                    (draw-propagator mor port nt-components-map "    ")
+                    (hash-set! drawn-mors (cat:arrow-id mor) #t)))
+                sys-mors))
+             (format port "  }\n"))))
        categories-by-system)
 
       ;; Draw toplevel categories

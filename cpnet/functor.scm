@@ -1,12 +1,12 @@
 (define-module (cpnet functor)
   #:use-module (srfi srfi-9)
-  #:export (functor?
-            functor-name
-	    functor-src-cat
-	    functor-tgt-cat
-	    functor-obj-map
-	    functor-mor-map
-	    make-functor-record))
+  #:export (make-functor-record
+            functor?
+            functor-src-cat
+            functor-tgt-cat
+            functor-obj-map
+            functor-mor-map
+            functor-name))
 
 (define-record-type <functor>
   (make-functor-record name src-cat tgt-cat obj-map mor-map)
@@ -16,4 +16,3 @@
   (tgt-cat functor-tgt-cat)
   (obj-map functor-obj-map)
   (mor-map functor-mor-map))
-

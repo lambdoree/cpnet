@@ -44,7 +44,7 @@
                                 (if (and running? (number? b)) (cons (* b 2) '()) (cons *nothing* '())))))
   ;; Termination Condition: counter > 0
   (propagator p-cond (get-cell 'iteration-category 'current_A) -> (get-cell 'iteration-category 'keep_running)
-              (lambda (val _) (let ((a val)) (cons (and (number? a) (> a 0)) '())))))
+              (lambda (val _) (cons (and (number? val) (> val 0)) '()))))
 
 (define-cpnet-system factorial-engine
   (iteration-category)
@@ -57,7 +57,7 @@
                                 (if (and running? (number? a) (number? b)) (cons (* a b) '()) (cons *nothing* '())))))
   ;; Termination Condition: n > 0
   (propagator p-cond (get-cell 'iteration-category 'current_A) -> (get-cell 'iteration-category 'keep_running)
-              (lambda (val _) (let ((a val)) (cons (and (number? a) (> a 0)) '())))))
+              (lambda (val _) (cons (and (number? val) (> val 0)) '()))))
 
 (define-cpnet-system gcd-engine
   (iteration-category)
@@ -70,7 +70,7 @@
                                 (if (and is-running (number? a) (number? b) (not (zero? b))) (cons (modulo a b) '()) (cons *nothing* '())))))
   ;; Termination Condition: b != 0
   (propagator p-cond (get-cell 'iteration-category 'current_B) -> (get-cell 'iteration-category 'keep_running)
-              (lambda (val _) (let ((b val)) (cons (and (number? b) (not (zero? b))) '())))))
+              (lambda (val _) (cons (and (number? val) (not (zero? val))) '()))))
 
 
 ;;;

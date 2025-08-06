@@ -1,8 +1,7 @@
 (define-module (cpnet iteration)
   #:use-module (cpnet dsl)
   #:use-module (cpnet core)
-  #:export (iteration-engine
-            iteration-category))
+  #:export (iteration-category))
 
 (define-object Bool)
 (define-object Data)
@@ -62,6 +61,3 @@
       (if (not (car vals))
           (cons (list (cadr vals) (caddr vals)) '())
           (cons *nothing* '()))))))
-
-(define-cpnet-system iteration-engine
-  (iteration-category))

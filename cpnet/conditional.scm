@@ -1,6 +1,7 @@
 (define-module (cpnet conditional)
   #:use-module (cpnet dsl)
   #:use-module (cpnet core)
+  #:use-module (cpnet system)
   #:export (conditional-engine))
 
 (define-object Bool)
@@ -11,12 +12,8 @@
    (instance p Bool #f replace-merge-fn)
    (instance a Data #f replace-merge-fn)
    (instance b Data #f replace-merge-fn)
-   (instance result Data #f replace-merge-fn))
-  (morphisms
-   ((morphism branch-true (p a) -> result)
-    (lambda (vals _) (if (car vals) (cons (cadr vals) '()) (cons *nothing* '()))))
-   ((morphism branch-false (p b) -> result)
-    (lambda (vals _) (if (not (car vals)) (cons (cadr vals) '()) (cons *nothing* '()))))))
+   (instance result Data #f replace-merge-fn)))
 
 (define-cpnet-system conditional-engine
-  (conditional-category))
+  (conditional-category)
+  (system-add-branch-propagator (current-system) 'conditional-category 'p 'a 'b 'result))
