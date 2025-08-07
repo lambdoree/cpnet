@@ -8,55 +8,6 @@
   #:use-module (srfi srfi-1)
   )
 
-;; 라이브러리의 define-nt 매크로에 버그가 있어 로컬에서 수정하여 사용합니다.
-;; 변수 스코프 문제를 해결하기 위해 재정의합니다.
-(define-syntax define-nt
-  (syntax-rules (component)
-    [(_ name F G (component obj-name mor-name) ...)
-     (define name
-       (let ((nt-F F) (nt-G G))
-         (let* ((C (functor-src-cat nt-F))
-                (D (functor-tgt-cat nt-F))
-                (components-alist
-                 (let ((obj-map (make-hash-table)))
-                   (for-each
-                    (lambda (o)
-                      (let* ((full-id-str (symbol->string (cell-id o)))
-                             (parts (string-split full-id-str #\.))
-                             (short-id-sym (string->symbol (car (last-pair parts)))))
-                        (hash-set! obj-map short-id-sym o)))
-                    (category-objects C))
-                   (list
-                    (let* ((obj-name 'obj-name)
-                           (mor-name 'mor-name)
-                           (obj (hash-ref obj-map obj-name))
-                           (mor (category-find-morphism-by-suffix D mor-name)))
-                      (if (and obj mor)
-                          (cons obj mor)
-                          (error 'define-nt "Cannot find object or morphism for component" obj-name mor-name))) ...)))
-                (η (make-nt-record 'name nt-F nt-G components-alist)))
-           ;; Naturality square validation / 자연성 사각형 검증
-           (for-each
-            (lambda (f)
-              (let* ((x (arrow-dom f))
-                     (y (arrow-cod f))
-                     (ηx-pair (assoc x (nt-components η)))
-                     (ηy-pair (assoc y (nt-components η))))
-                (when (and ηx-pair ηy-pair)
-                  (let ((ηx (cdr ηx-pair))
-                        (ηy (cdr ηy-pair))
-                        (Gf ((functor-mor-map nt-G) f))
-                        (Ff ((functor-mor-map nt-F) f)))
-                    (when (and Gf Ff)
-                      (let ((lhs (category-compose D Gf ηx))
-                            (rhs (category-compose D ηy Ff)))
-                        (unless ((category-equal-fn D) lhs rhs)
-                          (error 'nt-validate
-                                 (format #f "NT ~a fails naturality at morphism ~a" 'name f)))))))))
-            (category-morphisms C))
-           (system-add-nt! (current-system) η)
-           η)))]))
-
 (define-object Temperature)
 (define-object Precipitation)
 (define-object Flag)
@@ -90,7 +41,6 @@
    (instance security_armed SecurityStatus #t default-merge-fn)
    (instance power_save_mode Flag #f replace-merge-fn))
   (morphisms
-   ;; N:1 propagator example
    ((morphism light_control (time_of_day is_home) -> lights_on)
     (lambda (vals src)
       (let ((time (car vals)) 
@@ -111,10 +61,10 @@
                       (temp (cadr vals))
                       (power-save? (caddr vals))
                       (guests? (cadddr vals)))
-                  (cond ((< temp 40) (cons 'comfort '())) ;; Safety rule has top priority
-                        (guests? (cons 'comfort '()))     ;; Guest comfort is next
-                        (power-save? (cons 'eco '()))    ;; Power saving is next
-                        (is-home (cons 'comfort '()))     ;; Then user comfort
+                  (cond ((< temp 40) (cons 'comfort '()))
+                        (guests? (cons 'comfort '()))
+                        (power-save? (cons 'eco '()))
+                        (is-home (cons 'comfort '()))
                         (else (cons 'eco '()))))))
   (propagator presence_actions
               (list (get-cell 'home-automation 'is_home)

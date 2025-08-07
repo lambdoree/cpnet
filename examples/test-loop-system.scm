@@ -6,12 +6,6 @@
 
 (define-object Data)
 
-;; A category that will act as the body of our loop, calculating factorial.
-;; It takes 2 arguments. The first is a static input, ignored here.
-;; The second is the loop state, a pair '(n acc) where n is the counter
-;; and acc is the accumulator. It decrements n and multiplies it into
-;; acc until n reaches 0. The loop then stabilizes, and the final
-;; value of acc is the factorial.
 (define-category factorial-body
   (objects
    (instance X Data #f)
@@ -48,9 +42,8 @@
   (add-subsystem! (current-system) (loop-system 'my-loop))
   (add-subsystem! (current-system) (get-second-from-pair 'extractor))
 
-  ;; Wire the loop output to the extractor
   (wire (get-cell 'my-loop 'loop-interface 'output) (get-cell 'extractor 'get-second-from-pair 'pair))
-  ;; Wire the extractor's output to the final result cell
+
   (wire (get-cell 'extractor 'get-second-from-pair 'second) (get-cell 'TestLoopInterface 'final-val)))
 
 (parameterize ((current-system (TestLoopSystem)))
