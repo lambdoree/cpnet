@@ -21,7 +21,6 @@
             system-nts
             system-add-functor!
             system-add-nt!
-            system-add-branch-propagator
             system-remove-subsystem!
             ))
 
@@ -127,17 +126,4 @@
 
 (define (system-add-nt! system nt)
   (system-set-nts! system (cons nt (system-nts system))))
-
-(define (system-add-branch-propagator sys cat-name cond-name then-name else-name result-name)
-  (let* ((table (system-get-category-table sys cat-name))
-         (c (and table (hash-ref table cond-name #f)))
-         (t (and table (hash-ref table then-name #f)))
-         (e (and table (hash-ref table else-name #f)))
-         (r (and table (hash-ref table result-name #f)))
-         (id (string->symbol (format #f "branch-~a" (gensym)))))
-    (if (and c t e r)
-        (system-add-propagator! sys
-          (core:make-branch-propagator id c t e r))
-        (error "system-add-branch-propagator: cell not found"
-               (list cat-name cond-name then-name else-name result-name)))))
 
