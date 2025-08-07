@@ -431,7 +431,7 @@
 			  (gensym "wire-")
 			  from-cell
 			  to-cell
-			  (lambda (v _) (if (list? v) v (cons v '())))))))
+			  (lambda (vals _) (cons (if (null? vals) *nothing* (car vals)) '()))))))
 
 (define-syntax apply-functor-as-connections
   (syntax-rules (mappings ->)
@@ -602,26 +602,26 @@
                            (mor (category-find-morphism-by-suffix D mor-name)))
 		      (if (and obj mor)
                           (cons obj mor)
-                          (error 'define-nt "Cannot find object or morphism for component" obj-name mor-name))) ...)))
-		(η (make-nt-record 'name nt-F nt-G components-alist)))
-           ;; 자연성 사각형 검증
-           (for-each
-            (lambda (f)
-	      (let* ((x (arrow-dom f))
-                     (y (arrow-cod f))
-                     (ηx-pair (assoc x (nt-components η)))
-                     (ηy-pair (assoc y (nt-components η))))
-		(when (and ηx-pair ηy-pair)
-                  (let ((ηx (cdr ηx-pair))
-			(ηy (cdr ηy-pair))
-			(Gf ((functor-mor-map nt-G) f))
-			(Ff ((functor-mor-map nt-F) f)))
-                    (when (and Gf Ff)
-		      (let ((lhs (category-compose D Gf ηx))
-                            (rhs (category-compose D ηy Ff)))
-			(unless ((category-equal-fn D) lhs rhs)
-                          (error 'nt-validate
-				 (format #f "NT ~a fails naturality at morphism ~a" 'name f)))))))))
-            (category-morphisms C))
-           (system-add-nt! (current-system) η)
-           η)))]))
+                          (error 'define-nt "Cannot find object or morphism for component" obj-name mor-name))) ...))))
+	   (η (make-nt-record 'name nt-F nt-G components-alist)))
+         ;; 자연성 사각형 검증
+         (for-each
+          (lambda (f)
+	    (let* ((x (arrow-dom f))
+                   (y (arrow-cod f))
+                   (ηx-pair (assoc x (nt-components η)))
+                   (ηy-pair (assoc y (nt-components η))))
+	      (when (and ηx-pair ηy-pair)
+                (let ((ηx (cdr ηx-pair))
+		      (ηy (cdr ηy-pair))
+		      (Gf ((functor-mor-map nt-G) f))
+		      (Ff ((functor-mor-map nt-F) f)))
+                  (when (and Gf Ff)
+		    (let ((lhs (category-compose D Gf ηx))
+                          (rhs (category-compose D ηy Ff)))
+		      (unless ((category-equal-fn D) lhs rhs)
+                        (error 'nt-validate
+			       (format #f "NT ~a fails naturality at morphism ~a" 'name f)))))))))
+          (category-morphisms C))
+         (system-add-nt! (current-system) η)
+         η))]))

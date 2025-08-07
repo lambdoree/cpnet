@@ -1,7 +1,61 @@
 (define-module (examples N-M-prop)
   #:use-module (cpnet dsl)
   #:use-module (cpnet core)
+  #:use-module (cpnet category)
+  #:use-module (cpnet functor)
+  #:use-module (cpnet nt)
+  #:use-module (cpnet system)
+  #:use-module (srfi srfi-1)
   )
+
+;; 라이브러리의 define-nt 매크로에 버그가 있어 로컬에서 수정하여 사용합니다.
+;; 변수 스코프 문제를 해결하기 위해 재정의합니다.
+(define-syntax define-nt
+  (syntax-rules (component)
+    [(_ name F G (component obj-name mor-name) ...)
+     (define name
+       (let ((nt-F F) (nt-G G))
+         (let* ((C (functor-src-cat nt-F))
+                (D (functor-tgt-cat nt-F))
+                (components-alist
+                 (let ((obj-map (make-hash-table)))
+                   (for-each
+                    (lambda (o)
+                      (let* ((full-id-str (symbol->string (cell-id o)))
+                             (parts (string-split full-id-str #\.))
+                             (short-id-sym (string->symbol (car (last-pair parts)))))
+                        (hash-set! obj-map short-id-sym o)))
+                    (category-objects C))
+                   (list
+                    (let* ((obj-name 'obj-name)
+                           (mor-name 'mor-name)
+                           (obj (hash-ref obj-map obj-name))
+                           (mor (category-find-morphism-by-suffix D mor-name)))
+                      (if (and obj mor)
+                          (cons obj mor)
+                          (error 'define-nt "Cannot find object or morphism for component" obj-name mor-name))) ...)))
+                (η (make-nt-record 'name nt-F nt-G components-alist)))
+           ;; Naturality square validation / 자연성 사각형 검증
+           (for-each
+            (lambda (f)
+              (let* ((x (arrow-dom f))
+                     (y (arrow-cod f))
+                     (ηx-pair (assoc x (nt-components η)))
+                     (ηy-pair (assoc y (nt-components η))))
+                (when (and ηx-pair ηy-pair)
+                  (let ((ηx (cdr ηx-pair))
+                        (ηy (cdr ηy-pair))
+                        (Gf ((functor-mor-map nt-G) f))
+                        (Ff ((functor-mor-map nt-F) f)))
+                    (when (and Gf Ff)
+                      (let ((lhs (category-compose D Gf ηx))
+                            (rhs (category-compose D ηy Ff)))
+                        (unless ((category-equal-fn D) lhs rhs)
+                          (error 'nt-validate
+                                 (format #f "NT ~a fails naturality at morphism ~a" 'name f)))))))))
+            (category-morphisms C))
+           (system-add-nt! (current-system) η)
+           η)))]))
 
 (define-object Temperature)
 (define-object Precipitation)
@@ -87,10 +141,11 @@
    (instance siren_on Flag #f replace-merge-fn))
   (morphisms
    ((morphism alert->siren alert_message -> siren_on)
-    (lambda (msg _)
-      (if (string-contains msg "ALERT")
-          (cons #t '())
-          (cons #f '()))))))
+    (lambda (vals _)
+      (let ((msg (car vals)))
+        (if (and (string? msg) (string-contains msg "ALERT"))
+            (cons #t '())
+            (cons #f '())))))))
 
 (define-connections display-to-alert-connections
   (propagator status->alert
@@ -116,25 +171,27 @@
    (instance power_consumption Power 0 max-merge-fn))
   (morphisms
    ((morphism simple->verbose_translator home_status_simple -> home_status_verbose)
-    (lambda (v _)
-      (cond ((equal? v "OCCUPIED") (cons "User at Home" '()))
-            ((equal? v "EMPTY") (cons "House is Vacant" '()))
-            (else (cons *nothing* '())))))
+    (lambda (vals _)
+      (let ((v (car vals)))
+        (cond ((equal? v "OCCUPIED") (cons "User at Home" '()))
+              ((equal? v "EMPTY") (cons "House is Vacant" '()))
+              (else (cons *nothing* '()))))))
    ((morphism summarize_verbose_status home_status_verbose -> executive_summary)
-    (lambda (v _)
-      (cond ((string-contains v "User at Home") (cons "ALL OK" '()))
-            ((string-contains v "House is Vacant") (cons "SYSTEM NOMINAL" '()))
-            (else (cons "UNKNOWN" '())))))))
+    (lambda (vals _)
+      (let ((v (car vals)))
+        (cond ((and (string? v) (string-contains v "User at Home")) (cons "ALL OK" '()))
+              ((and (string? v) (string-contains v "House is Vacant")) (cons "SYSTEM NOMINAL" '()))
+              (else (cons "UNKNOWN" '()))))))))
 
 (define-connections display-compute-connections
   (propagator update_power_consumption
-              (list (get-cell 'display_panel 'home_status_verbose)
+	      (list (get-cell 'display_panel 'home_status_verbose)
                     (get-cell 'display_panel 'weather_status))
-              ->
-              (get-cell 'display_panel 'power_consumption)
-              (lambda (vals _)
+	      ->
+	      (get-cell 'display_panel 'power_consumption)
+	      (lambda (vals _)
                 (let ((home-status (car vals))
-                      (weather-status (cadr vals)))
+		      (weather-status (cadr vals)))
                   (let ((power (+ (if (equal? home-status "User at Home") 5 1)
                                   (if (equal? weather-status "WARNING") 10 1))))
                     (cons power '()))))))
@@ -218,16 +275,18 @@
  (connections
   (display-compute-connections)
   (propagator power_overload_manager
-              (list (get-cell 'display-panel-system.display_panel 'power_consumption)
-                    (get-cell 'SmartHomeSystem.home-automation 'is_home))
-              ->
-              (get-cell 'SmartHomeSystem.home-automation 'power_save_mode)
-              (lambda (vals _)
+	      (list (get-cell 'display-panel-system.display_panel 'power_consumption)
+                    (get-cell 'SmartHomeSystem.home-automation 'is_home)
+                    (get-cell 'SmartHomeSystem.weather-station 'outside_temp))
+	      ->
+	      (get-cell 'SmartHomeSystem.home-automation 'power_save_mode)
+	      (lambda (vals _)
                 (let ((power (car vals))
-                      (is-home (cadr vals)))
-                  (if (and (> power 10) (not is-home))
-                      (cons #t '())
-                      (cons #f '()))))))
+		      (is-home (cadr vals))
+                      (temp (caddr vals)))
+                  (if (and (> power 10) (not is-home) (>= temp 40))
+		      (cons #t '())
+		      (cons #f '()))))))
  (execution
   (define F-simple-view
     (make-system-functor
@@ -258,15 +317,15 @@
 
   (apply-functor-as-connections F-simple-view
 				(mappings
-				 (is_home -> home_status_simple (lambda (v _) (cons (if v "OCCUPIED" "EMPTY") '())))))
+				 (is_home -> home_status_simple (lambda (vals _) (cons (if (car vals) "OCCUPIED" "EMPTY") '())))))
   
   (apply-functor-as-connections G-verbose-view
 				(mappings
-				 (is_home -> home_status_verbose (lambda (v _) (cons (if v "User at Home" "House is Vacant") '())))))
+				 (is_home -> home_status_verbose (lambda (vals _) (cons (if (car vals) "User at Home" "House is Vacant") '())))))
 
   (apply-functor-as-connections H-ExecutiveSummary
 				(mappings
-				 (is_home -> executive_summary (lambda (v _) (cons (if v "ALL OK" "SYSTEM NOMINAL") '())))))
+				 (is_home -> executive_summary (lambda (vals _) (cons (if (car vals) "ALL OK" "SYSTEM NOMINAL") '())))))
 
   ;; Connect the weather system as before.
   (apply-functor-as-connections
@@ -275,7 +334,7 @@
     (to display-panel-system.display_panel)
     (mappings (precipitation -> weather_status)))
    (mappings
-    (precipitation -> weather_status (lambda (v _) (cons (if (eq? v 'rain) "WARNING" "CLEAR") '())))))
+    (precipitation -> weather_status (lambda (vals _) (cons (if (eq? (car vals) 'rain) "WARNING" "CLEAR") '())))))
   
   (visualize "composed-system.dot")
   (run-weather-scenario)

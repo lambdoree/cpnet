@@ -22,6 +22,7 @@
             system-add-functor!
             system-add-nt!
             system-add-branch-propagator
+            system-remove-subsystem!
             ))
 
 (define-record-type <cpnet-system>
@@ -39,6 +40,29 @@
                       (make-hash-table)
                       '()
                       '()))
+
+(define (system-remove-subsystem! system prefix-sym)
+  (let* ((prefix-str (symbol->string prefix-sym))
+         (net (system-get-net system))
+         (tables (system-get-cell-tables system)))
+    ;; Remove morphisms
+    (for-each
+     (lambda (mor)
+       (when (string-prefix? prefix-str (symbol->string (cat:arrow-id mor)))
+         (cat:category-remove-morphism net mor)))
+     (cat:category-morphisms net))
+    ;; Remove objects (cells)
+    (for-each
+     (lambda (obj)
+       (when (string-prefix? prefix-str (symbol->string (core:cell-id obj)))
+         (cat:category-remove-object net obj)))
+     (cat:category-objects net))
+    ;; Remove cell tables
+    (for-each
+     (lambda (key)
+       (when (string-prefix? prefix-str (symbol->string key))
+         (hash-remove! tables key)))
+     (hash-map->list (lambda (k v) k) tables))))
 
 (define (system-add-objects system . objects)
   (let ((net (system-get-net system))

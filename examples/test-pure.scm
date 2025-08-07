@@ -10,14 +10,14 @@
 (define-object Bool)
 (define-object category-builder)
 
-(define left-gate-builder  (get-builder 'left-gate))
-(define right-gate-builder (get-builder 'right-gate))
+(define true-gate-builder  (get-builder 'true-gate))
+(define false-gate-builder (get-builder 'false-gate))
 
 (define-category ConditionalApplyInterface
   (objects
    (instance cond      Bool #t)
-   (instance then_code category-builder left-gate-builder)
-   (instance else_code category-builder right-gate-builder)
+   (instance then_code category-builder true-gate-builder)
+   (instance else_code category-builder false-gate-builder)
    (instance arg_a     Data 100)
    (instance arg_b     Data 200)
    (instance result    Data #f)))
@@ -48,7 +48,7 @@
            (list (get-cell 'ConditionalApplyInterface 'arg_a)
                  (get-cell 'ConditionalApplyInterface 'arg_b)))
   
-  (display "Should apply 'left-gate' to (100, 200)\n")
+  (display "Should apply 'true-gate' to (100, 200)\n")
   (run)
   (show-state "Result should be 100")
   (visualize "cond-apply-true.dot"))
@@ -61,7 +61,7 @@
            (list (get-cell 'ConditionalApplyInterface 'arg_a)
                  (get-cell 'ConditionalApplyInterface 'arg_b)))
 
-  (display "Should apply 'right-gate' to (100, 200)\n")
+  (display "Should apply 'false-gate' to (100, 200)\n")
   (run)
   (show-state "Result should be 200")
   (visualize "cond-apply-false.dot"))
