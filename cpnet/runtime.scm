@@ -1,16 +1,45 @@
 (define-module (cpnet runtime)
   #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-11)
+  #:use-module (srfi srfi-9)
   #:use-module (ice-9 hash-table)
   #:use-module ((cpnet core) :prefix core:)
   #:use-module ((cpnet category) :prefix cat:)
-  #:use-module (cpnet dsl)
   #:use-module (cpnet system)
   #:export (
+            current-system
 	    runtime-settle!
 	    runtime-step!
 	    runtime-execute-effects
-	    runtime-show-state))
+	    runtime-show-state
+            *effect-log*
+            clear-effect-log!
+            log-effects
+            transaction?
+            tx-id
+            tx-scope
+            tx-effects))
+
+(define current-system (make-parameter #f))
+
+(define VALIDATE_ON_EFFECTS #t)
+(define MAX_STEPS 1000)
+
+(define-record-type <transaction>
+  (make-tx id scope effects)
+  transaction?
+  (id tx-id)
+  (scope tx-scope)
+  (effects tx-effects))
+
+(define *effect-log* '())
+
+(define (clear-effect-log!)
+  (set! *effect-log* '()))
+
+(define (log-effects scope effects)
+  (let ((tx (make-tx (gensym "tx-") scope effects)))
+    (set! *effect-log* (cons tx *effect-log*))))
 
 (define (get-net system-or-net)
   (if (system? system-or-net)
@@ -41,26 +70,22 @@
                (set! changed? #t)
                (set! activated-cells (cons cell activated-cells)))))
          ((remove-subsystem)
-          (let* ((payload (core:effect-payload effect))
-                 (sys (if system system (current-system))))
-            (system-remove-subsystem! sys payload)
-            (set! changed? #t)))
+          (system-remove-subsystem! system (core:effect-payload effect))
+          (set! changed? #t))
          ((add-subsystem)
           (let* ((payload (core:effect-payload effect))
                  (name (car payload))
                  (cat-proc (cadr payload))
-                 (sys (if system system (current-system)))
                  (sub-sys (cat-proc name)))
-            (add-subsystem! sys sub-sys)
+            (add-subsystem! system sub-sys)
             (set! changed? #t)))
          ((add-morphisms)
            (let* ((payload (core:effect-payload effect))
-                  (sys (if system system (current-system)))
                   (resolve-ref (lambda (ref)
                                  (if (core:cell? ref) ref
                                      (let ((cat-name (car ref))
                                            (cell-name (cadr ref)))
-                                       (or (system-find-cell sys cat-name cell-name)
+                                       (or (system-find-cell system cat-name cell-name)
                                            (error "add-morphisms effect: could not resolve cell ref" ref))))))
                   (new-mors (map (lambda (desc)
                                    (let* ((src-refs (car desc))
@@ -68,9 +93,9 @@
                                           (fn (caddr desc))
                                           (src (core:map-maybe resolve-ref src-refs))
                                           (tgt (core:map-maybe resolve-ref tgt-refs)))
-                                     (core:make-propagator (gensym "dyn-wire-") src tgt fn)))
+                                     (make-propagator (gensym "dyn-wire-") src tgt fn)))
                                  payload)))
-             (system-add-morphisms sys new-mors)
+             (system-add-morphisms system new-mors)
              (for-each
               (lambda (mor)
                 (let ((dom (cat:arrow-dom mor)))
@@ -81,7 +106,17 @@
              (set! changed? #t)))
          (else (format #t "Unknown effect: ~a\n" (core:effect-type effect)))))
      effects)
+    (when (and changed? VALIDATE_ON_EFFECTS system)
+      (unless (cat:category-validate (system-get-net system))
+        (error "Category axiom violated after effects.")))
     (values changed? (delete-duplicates activated-cells))))
+
+(define (_runtime-snapshot system)
+  (let* ((net (get-net system))
+         (objs (cat:category-objects net))
+         (sorted-objs (sort objs (lambda (a b) (string<? (symbol->string (core:cell-id a))
+                                                           (symbol->string (core:cell-id b)))))))
+    (map core:cell-value sorted-objs)))
 
 (define (runtime-show-state system-or-net title)
   (display (format #f "\n--- [~a] cpnet state ---\n" title))
@@ -112,9 +147,10 @@
                               compute-mors
                               (filter (lambda (m)
                                         (let ((dom (cat:arrow-dom m)))
-                                          (if (list? dom)
-                                              (any (lambda (d) (member d active-cells eq?)) dom)
-                                              (member dom active-cells))))
+                                          (or (null? dom)
+                                              (if (list? dom)
+                                                  (any (lambda (d) (member d active-cells eq?)) dom)
+                                                  (member dom active-cells)))))
                                       compute-mors)))
            (sorted-mors (sort relevant-mors
                               (lambda (a b) (> (cat:arrow-priority a)
@@ -131,8 +167,8 @@
              (when valid-sources?
                (set! executed-mors (cons m executed-mors))
                (let* ((vals (if (list? srcs)
-                                (map core:cell-value srcs)
-                                (list (core:cell-value srcs))))
+                                (map (lambda (s) (if (core:cell? s) (core:cell-value s) s)) srcs)
+                                (list (if (core:cell? srcs) (core:cell-value srcs) srcs))))
                       (result ((cat:arrow-fn m) vals srcs))
                       (prop-val (car result))
                       (prop-effects (cdr result)))
@@ -192,13 +228,25 @@
   ;; First step is a full evaluation to find initial changes.
   (let-values (((changed? initial-trace changed-cells) (runtime-step! system-or-net #f)))
     ;; Now loop, propagating changes until a fixed point is reached.
-    (let loop ((changed? changed?)
+    (let loop ((n 0)
+               (changed? changed?)
                (full-trace initial-trace)
-               (active-cells changed-cells))
-      (if changed?
+               (active-cells changed-cells)
+               (history (list (_runtime-snapshot system-or-net))))
+      (if (and changed? (< n MAX_STEPS))
           (let-values (((step-changed? step-trace step-changed-cells)
                         (runtime-step! system-or-net active-cells)))
-            (loop step-changed?
-                  (append full-trace step-trace)
-                  step-changed-cells))
-          (reverse full-trace)))))
+            (let ((snapshot (_runtime-snapshot system-or-net)))
+              (if (member snapshot history equal?)
+                  (begin
+                    (format (current-error-port) "Warning: runtime-settle! detected an oscillation at step ~a.\n" (+ n 1))
+                    (reverse (append full-trace step-trace)))
+                  (loop (+ n 1)
+                        step-changed?
+                        (append full-trace step-trace)
+                        step-changed-cells
+                        (cons snapshot history)))))
+          (begin
+            (when (and changed? (>= n MAX_STEPS))
+              (format (current-error-port) "Warning: runtime-settle! reached MAX_STEPS (~a) and did not converge.\n" MAX_STEPS))
+            (reverse full-trace))))))

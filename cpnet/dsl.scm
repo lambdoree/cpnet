@@ -11,26 +11,21 @@
   #:export (define-category define-connections define-scenario
              define-cpnet-system compose-systems
              visualize
-             define-object
              effect-scope
 	     propagator
 	     trigger run show-state
-             current-system
 	     get-cell-value set-cell-effect
              get-cell
 	     define-functor define-nt
              apply-functor-as-connections
              make-system-functor
-             wire
-             add-subsystem!))
+             wire))
 
 (define (syntax->list stx)
   (syntax-case stx ()
     (() '())
     ((x . xs) (cons #'x (syntax->list #'xs)))
     (_ (syntax-violation 'syntax->list "not a proper list" stx))))
-
-(define current-system (make-parameter #f))
 
 (define (get-cell-value category-name cell-name)
   (let* ((sys (current-system)))
@@ -48,9 +43,13 @@
           (make-effect 'set-value (cons cell value))
           (error "set-cell-effect: cannot find cell" (list category-name cell-name))))))
 
-(define-syntax-rule (define-object name) (begin))
-
-(define-syntax-rule (effect-scope cat-name-sym fn) fn)
+(define-syntax-rule (effect-scope scope-name fn)
+  (lambda (vals srcs)
+    (let* ((res (fn vals srcs))
+           (effects (cdr res)))
+      (when (and effects (not (null? effects)))
+        (log-effects 'scope-name effects))
+      res)))
 
 (define (get-cell system-or-cat-name . path)
   (let ((sys (current-system)))
@@ -67,10 +66,14 @@
               (error "get-cell: cell not found in subsystem" (system-name sys) mangled-cat-name cell-name)))
         (let* ((all-parts (cons system-or-cat-name path))
                (cell-name (car (last-pair all-parts)))
-               (cat-parts (reverse (cdr (reverse all-parts)))))
-          (if (null? cat-parts)
+               (raw-cat-parts (reverse (cdr (reverse all-parts)))))
+          (if (null? raw-cat-parts)
               (error "get-cell: not enough arguments" all-parts)
-              (let* ((full-cat-name (if (= 1 (length cat-parts))
+              (let* ((cat-parts (if (and (> (length raw-cat-parts) 1)
+                                         (eq? (car raw-cat-parts) (system-name sys)))
+                                    (cdr raw-cat-parts)
+                                    raw-cat-parts))
+                     (full-cat-name (if (= 1 (length cat-parts))
                                         (car cat-parts)
                                         (string->symbol (string-join (map symbol->string cat-parts) "."))))
                      (direct-cell (system-find-cell sys full-cat-name cell-name)))
@@ -116,26 +119,25 @@
 (define-syntax create-instance-from-stx
   (lambda (stx)
     (syntax-case stx (instance quote)
-      ;; with merge function
-      [(_ (quote name-sym) (instance id type-name init merge-fn) table)
+      ;; with lattice-id
+      [(_ (quote name-sym) (instance id type-name init lattice-id) table)
        #`(let* ((name-str (symbol->string 'name-sym))
 		(id-sym 'id)
 		(type-sym 'type-name)
 		(init-val init)
-		(merge-fn merge-fn)
+		(lattice-sym lattice-id)
 		(cid-val (string->symbol (format #f "~a.~a" name-str id-sym)))
-		(c (make-cell cid-val type-sym init-val merge-fn)))
+		(c (make-cell cid-val type-sym init-val lattice-sym)))
            (hash-set! table id-sym c)
            c)]
-      ;; without merge function
+      ;; without lattice-id
       [(_ (quote name-sym) (instance id type-name init) table)
        #`(let* ((name-str (symbol->string 'name-sym))
 		(id-sym 'id)
 		(type-sym 'type-name)
 		(init-val init)
-		(merge-fn default-merge-fn)
 		(cid-val (string->symbol (format #f "~a.~a" name-str id-sym)))
-		(c (make-cell cid-val type-sym init-val merge-fn)))
+		(c (make-cell cid-val type-sym init-val)))
            (hash-set! table id-sym c)
            c)])))
 
@@ -306,7 +308,7 @@
                      (let ((new-system (make-system (car maybe-name))))
                        (parameterize ((current-system new-system)) (body new-system))
                        new-system))))
-             (register-builder (make-category-builder 'the-name name))))]
+             (register-builder (make-category-builder 'the-name name '()))))]
       ;; objects-only
       [(_ name (objects inst-def ...))
        (with-syntax ([the-name #'name]
@@ -326,7 +328,7 @@
                      (let ((new-system (make-system (car maybe-name))))
                        (parameterize ((current-system new-system)) (body new-system))
                        new-system))))
-             (register-builder (make-category-builder 'the-name name))))])))
+             (register-builder (make-category-builder 'the-name name '()))))])))
 
 (define-syntax define-connections
   (syntax-rules (propagator connector)
@@ -354,48 +356,6 @@
                    new-system)))
              (register-builder (make-category-builder 'the-name name))))])))
 
-(define (add-subsystem! target-system source-system-or-proc)
-  (let* ((source-system (if (procedure? source-system-or-proc)
-                            (source-system-or-proc)
-                            source-system-or-proc))
-         (source-prefix (system-name source-system))
-         (old->new-cell-map (make-hash-table)))
-    (when (not source-prefix)
-      (error "Cannot compose an unnamed system" source-system))
-    (let ((source-net (system-get-net source-system)))
-      (for-each
-       (lambda (old-cell)
-         (let* ((new-id (string->symbol (format #f "~a.~a" source-prefix (cell-id old-cell))))
-                (new-cell (make-cell new-id (cell-type old-cell) (cell-value old-cell) (cell-merge-fn old-cell))))
-           (hash-set! old->new-cell-map old-cell new-cell)))
-       (category-objects source-net))
-      (system-add-objects target-system (hash-map->list (lambda (k v) v) old->new-cell-map)))
-    (let ((source-net (system-get-net source-system)))
-      (for-each
-       (lambda (old-mor)
-         (let* ((map-one (lambda (c) (hash-ref old->new-cell-map c #f)))
-                (old-dom (arrow-dom old-mor))
-                (old-cod (arrow-cod old-mor))
-                (new-dom (map-maybe map-one old-dom))
-                (new-cod (map-maybe map-one old-cod)))
-           (if (and new-dom (if (list? new-dom) (not (member #f new-dom)) #t)
-                    new-cod (if (list? new-cod) (not (member #f new-cod)) #t))
-               (let* ((old-fn (arrow-fn old-mor))
-                      (new-mor-id (string->symbol (format #f "~a.~a" source-prefix (arrow-id old-mor)))))
-                 (system-add-morphisms target-system (list (make-propagator new-mor-id new-dom new-cod old-fn (arrow-priority old-mor)))))
-               (format (current-error-port) "Warning: could not map morphism ~a during subsystem merge.\n" (arrow-id old-mor)))))
-       (category-morphisms source-net)))
-    (hash-for-each
-     (lambda (cat-name table)
-       (let* ((mangled-cat-name (string->symbol (format #f "~a.~a" source-prefix cat-name)))
-              (new-table (make-hash-table)))
-         (hash-for-each
-          (lambda (cell-name old-cell)
-            (let ((new-cell (hash-ref old->new-cell-map old-cell)))
-              (hash-set! new-table cell-name new-cell)))
-          table)
-         (system-add-cell-table target-system mangled-cat-name new-table)))
-     (system-get-cell-tables source-system))))
 
 (define-syntax compose-systems
   (syntax-rules (systems connections execution)

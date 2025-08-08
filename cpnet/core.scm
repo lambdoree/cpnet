@@ -2,8 +2,6 @@
   #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-9)
   #:use-module (ice-9 hash-table)
-  #:use-module ((cpnet category) :prefix cat:)
-  #:use-module ((cpnet functor) :prefix fun:)
   #:export (
 	    cell?
 	    make-cell
@@ -11,6 +9,7 @@
 	    cell-type
 	    cell-value
 	    cell-set-value!
+            cell-lattice-id
 	    cell-merge-fn
 	    cell-system
 	    cell-set-system!
@@ -18,35 +17,29 @@
 	    make-effect
 	    effect-type
 	    effect-payload
-	    propagator?
-	    make-propagator
-	    propagator-equal?
-	    propagator-compose
-	    propagator-id-fn
-	    make-cpnet-category
-	    make-cpnet-functor
             *nothing*
-            default-merge-fn
-            replace-merge-fn
-            append-merge-fn
-            max-merge-fn
-            min-merge-fn
             map-maybe
-            make-branch-propagator
             category-builder?
             make-category-builder
             builder-name
             builder-function
             *builder-registry*
             register-builder
+	    register-lattice
+	    builder-signature
             get-builder
+            define-object
             ))
 
 (define-record-type <category-builder>
-  (make-category-builder name builder-proc)
+  (make-category-builder-internal name builder-proc signature)
   category-builder?
   (name builder-name)
-  (builder-proc builder-function))
+  (builder-proc builder-function)
+  (signature builder-signature))
+
+(define (make-category-builder name builder-proc . maybe-signature)
+  (make-category-builder-internal name builder-proc (if (null? maybe-signature) '() (car maybe-signature))))
 
 (define *builder-registry* (make-hash-table))
 (define (register-builder cb)
@@ -63,28 +56,28 @@
 (define (map-maybe f x)
   (if (list? x) (map f x) (f x)))
 
-(define (make-branch-propagator id cond-cell then-cell else-cell result-cell)
-  (make-propagator
-   id
-   (list cond-cell then-cell else-cell)
-   result-cell
-   (lambda (vals _)
-     (let ((p? (list-ref vals 0))
-           (x  (list-ref vals 1))
-           (y  (list-ref vals 2)))
-       (cond
-        ((eq? p? #t) (cons x '()))
-        ((eq? p? #f) (cons y '()))
-        (else (cons *nothing* '())))))))
+(define-record-type <lattice>
+  (make-lattice bottom join)
+  lattice?
+  (bottom lattice-bottom)
+  (join lattice-join))
+
+(define *lattice-registry* (make-hash-table))
+(define (register-lattice id bottom join-fn)
+  (hash-set! *lattice-registry* id (make-lattice bottom join-fn)))
 
 (define-record-type <cell>
-  (make-cell-record id type value merge-fn system)
+  (make-cell-record id type value lattice-id system)
   cell?
   (id cell-id)
   (type cell-type)
   (value cell-value set-cell-value!)
-  (merge-fn cell-merge-fn)
+  (lattice-id cell-lattice-id)
   (system cell-system set-cell-system!))
+
+(define (cell-merge-fn cell)
+  (let ((l (hash-ref *lattice-registry* (cell-lattice-id cell))))
+    (if l (lattice-join l) (error "Lattice not found" (cell-lattice-id cell)))))
 
 (define-record-type <effect>
   (make-effect type payload)
@@ -92,25 +85,9 @@
   (type effect-type)
   (payload effect-payload))
 
-(define (default-merge-fn cell new-vals)
-  (let* ((old (cell-value cell))
-         (unique-new-vals (delete-duplicates new-vals equal?)))
-    (cond ((null? unique-new-vals) (cons old '()))
-          ((and (= 1 (length unique-new-vals)) (equal? (car unique-new-vals) old))
-           (cons old '()))
-          ((= 1 (length unique-new-vals))
-           (cons (car unique-new-vals) '()))
-          (else
-           (cons #f
-                 (list (make-effect 'display
-                                    (format #f "CONFLICT on cell ~a. Values: ~a. Reverting to bottom (#f).\n"
-                                            (cell-id cell) new-vals))))))))
-
-(define (make-cell id type init-val . maybe-merge-fn)
-  (let ((merge-fn (if (null? maybe-merge-fn)
-                      default-merge-fn
-                      (car maybe-merge-fn))))
-    (make-cell-record id type init-val merge-fn #f)))
+(define (make-cell id type init-val . maybe-lattice-id)
+  (let ((lattice-id (if (null? maybe-lattice-id) 'Default (car maybe-lattice-id))))
+    (make-cell-record id type init-val lattice-id #f)))
 
 (define (cell-set-value! c new-val)
   (set-cell-value! c new-val)
@@ -120,91 +97,72 @@
   (set-cell-system! c new-sys)
   c)
 
-(define (make-propagator id src tgt fn . priority)
-  (let ((real-src (if (and (list? src) (= 1 (length src)) (not (cell? (car src)))) (car src) src))
-        (real-tgt (if (and (list? tgt) (= 1 (length tgt)) (not (cell? (car tgt)))) (car tgt) tgt)))
-   (apply cat:make-arrow id real-src real-tgt fn priority)))
-
-(define propagator? cat:arrow?)
-
-(define (propagator-equal? p q)
-  (eq? (cat:arrow-id p) (cat:arrow-id q)))
-
-(define (propagator-compose g f)
-  (unless (equal? (cat:arrow-cod f) (cat:arrow-dom g))
-    (error "Cannot compose: cod(f) ≠ dom(g)"))
-  (let* ((name (string->symbol
-                (string-append
-                 (symbol->string (cat:arrow-id g))
-                 "_o_"
-                 (symbol->string (cat:arrow-id f)))))
-         (compose-fn (lambda (x src-cell)
-                       (let* ((res-f ((cat:arrow-fn f) x src-cell))
-                              (val-y (car res-f))
-                              (effects-f (cdr res-f)))
-                         (if (eq? val-y #f)
-                             (cons #f effects-f)
-                             (let* ((res-g ((cat:arrow-fn g) val-y (cat:arrow-cod f)))
-                                    (val-z (car res-g))
-                                    (effects-g (cdr res-g)))
-                               (cons val-z (append effects-f effects-g))))))))
-    (let ((prio-f (cat:arrow-priority f))
-          (prio-g (cat:arrow-priority g)))
-      (make-propagator name (cat:arrow-dom f) (cat:arrow-cod g) compose-fn (max prio-f prio-g)))))
-
-(define (propagator-id-fn cell)
-  (let ((name (string->symbol
-               (string-append "id-" (symbol->string (cell-id cell))))))
-    ;; Give identity propagators a high priority so they are considered
-    ;; identities during composition validation before other propagators.
-    (make-propagator name cell cell (lambda (x _) (cons x '())) 100)))
-
-(define (make-cpnet-category objects morphisms)
-  (cat:make-category
-   cat:arrow-dom cat:arrow-cod
-   (lambda (g f) (propagator-compose g f))
-   propagator-id-fn
-   propagator-equal?
-   cat:arrow-id
-   objects
-   morphisms))
-
 (define *nothing* (gensym "nothing"))
 
-(define (replace-merge-fn cell new-vals)
-  (if (null? new-vals)
-      (cons (cell-value cell) '())
-      (cons (car new-vals) '())))
+(register-lattice 'Default #f
+		  (lambda (cell new-vals)
+		    (let* ((old (cell-value cell))
+			   (unique-new-vals (delete-duplicates new-vals equal?)))
+		      (cond ((null? unique-new-vals) (cons old '()))
+			    ((and (= 1 (length unique-new-vals)) (equal? (car unique-new-vals) old))
+			     (cons old '()))
+			    ((= 1 (length unique-new-vals))
+			     (cons (car unique-new-vals) '()))
+			    (else
+			     (cons #f
+				   (list (make-effect 'display
+						      (format #f "CONFLICT on cell ~a. Values: ~a. Reverting to bottom (#f).\n"
+							      (cell-id cell) new-vals)))))))))
 
-(define (append-merge-fn cell new-vals)
-  (let ((current (let ((val (cell-value cell)))
-                   (if (list? val) val (if (not (eq? val #f)) (list val) '()))))
-        (news (map (lambda (v) (if (list? v) v (if (not (eq? v #f)) (list v) '()))) new-vals)))
-    (cons (delete-duplicates (apply append (cons current news)) equal?) '())))
+(register-lattice 'Replace #f
+		  (lambda (cell new-vals)
+		    (if (null? new-vals)
+			(cons (cell-value cell) '())
+			(cons (car new-vals) '()))))
 
-(define (max-merge-fn cell new-vals)
-  (if (null? new-vals)
-      (cons (cell-value cell) '())
-      (cons (apply max new-vals) '())))
+(register-lattice 'Set '()
+		  (lambda (cell new-vals)
+		    (let ((current (let ((val (cell-value cell)))
+				     (if (list? val) val (if (not (eq? val #f)) (list val) '()))))
+			  (news (map (lambda (v) (if (list? v) v (if (not (eq? v #f)) (list v) '()))) new-vals)))
+		      (cons (delete-duplicates (apply append (cons current news)) equal?) '()))))
 
-(define (min-merge-fn cell new-vals)
-  (if (null? new-vals)
-      (cons (cell-value cell) '())
-      (cons (apply min new-vals) '())))
+(register-lattice 'Max *nothing*
+  (lambda (cell new-vals)
+    (if (null? new-vals)
+        (cons (cell-value cell) '())
+        (let ((numbers (filter number? new-vals)))
+          (if (null? numbers)
+              (cons (cell-value cell) '())
+              (cons (apply max numbers) '()))))))
 
-(define (make-cpnet-functor name src-cat tgt-cat cell-map)
-  (let* ((F0 (lambda (obj)
-               (let ((pair (assoc obj cell-map)))
-                 (if pair
-                     (cdr pair)
-                     #f))))
-         (F1 (lambda (p)
-               (let* ((id (cat:arrow-id p))
-                      (id-str (symbol->string id)))
-                 (if (string-contains id-str "id-")
-                     (propagator-id-fn (F0 (cat:arrow-dom p)))
-                     (let ((new-dom (map-maybe F0 (cat:arrow-dom p)))
-                           (new-cod (map-maybe F0 (cat:arrow-cod p))))
-                       (make-propagator id new-dom new-cod (cat:arrow-fn p))))))))
-    (fun:make-functor-record name src-cat tgt-cat F0 F1)))
+(register-lattice 'Min *nothing*
+  (lambda (cell new-vals)
+    (if (null? new-vals)
+        (cons (cell-value cell) '())
+        (let ((numbers (filter number? new-vals)))
+          (if (null? numbers)
+              (cons (cell-value cell) '())
+              (cons (apply min numbers) '()))))))
+
+(register-lattice 'Bool #f
+  (lambda (cell new-vals)
+    (if (null? new-vals)
+        (cons (cell-value cell) '())
+        (let ((bool-vals (filter boolean? new-vals)))
+          (if (null? bool-vals)
+              (cons (cell-value cell) '())
+              (cons (any identity bool-vals) '()))))))
+
+(register-lattice 'Maybe *nothing*
+  (lambda (cell new-vals)
+    (let ((defined-vals (filter (lambda (v) (not (eq? v *nothing*))) new-vals)))
+      (cond
+       ((null? defined-vals) (cons *nothing* '()))
+       ((= 1 (length defined-vals)) (cons (car defined-vals) '()))
+       (else (cons (car defined-vals)
+                   (list (make-effect 'display
+                                      (format #f "CONFLICT on Maybe cell ~a. Values: ~a. Taking first value.\n"
+                                              (cell-id cell) defined-vals)))))))))
+
 

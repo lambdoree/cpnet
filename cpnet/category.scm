@@ -102,14 +102,16 @@
   (let ((objs (_category-objects-h cat))
         (morphs (_category-morphisms-h cat))
         (dom (category-dom-fn cat))
-        (cod (category-cod-fn cat)))
+        (cod (category-cod-fn cat))
+        (mors-to-remove '()))
     (hash-remove! objs obj)
     (hash-for-each
      (lambda (k a)
        (when (or (equal? (dom a) obj)
                  (equal? (cod a) obj))
-         (hash-remove! morphs k)))
+         (set! mors-to-remove (cons k mors-to-remove))))
      morphs)
+    (for-each (lambda (k) (hash-remove! morphs k)) mors-to-remove)
     cat))
 
 (define (category-add-morphism cat arrow)

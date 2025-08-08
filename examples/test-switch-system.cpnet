@@ -1,0 +1,9 @@
+(system TestSwitchSystem
+  (interface TestSwitchInterface)
+  (subsystems
+   ((my-switch switch-system)))
+  (wires
+   (((TestSwitchInterface input-key) -> (my-switch switch-interface key)))
+   (((TestSwitchInterface case-data) -> (my-switch switch-interface cases)))
+   (((TestSwitchInterface default-data) -> (my-switch switch-interface default)))
+   (((my-switch switch-interface result) -> (TestSwitchInterface output)))))

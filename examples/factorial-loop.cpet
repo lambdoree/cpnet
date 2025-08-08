@@ -1,0 +1,8 @@
+(system TestLoopSystem
+  (interface TestLoopInterface)
+  (subsystems
+   ((my-loop loop-system))
+   ((extractor get-second-from-pair)))
+  (wires
+   (((my-loop loop-interface output) -> (extractor get-second-from-pair pair)))
+   (((extractor get-second-from-pair second) -> (TestLoopInterface final-val)))))
