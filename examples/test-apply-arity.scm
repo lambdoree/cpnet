@@ -24,17 +24,13 @@
 
 (define-cpnet-system SourceTestSystem
   (SourceTestInterface)
-  (add-subsystem! (current-system) (apply-gate 'source-impl))
-  (propagator p-setup
-    (get-builder 'const-42)
-    -> (list (get-cell 'source-impl 'apply-interface 'code)
-             (get-cell 'source-impl 'apply-interface 'args)
-             (get-cell 'source-impl 'apply-interface 'results))
-    (lambda (vals srcs)
-      (cons (list (car vals) '() (list (get-cell 'SourceTestInterface 'result))) '()))))
+  (add-subsystem! (current-system) (apply-gate 'source-impl)))
 
 (parameterize ((current-system (SourceTestSystem)))
   (show-state "--- Arity Test (0->1): Before ---")
+  (trigger (get-cell 'source-impl 'apply-interface 'code) (get-builder 'const-42))
+  (trigger (get-cell 'source-impl 'apply-interface 'args) '())
+  (trigger (get-cell 'source-impl 'apply-interface 'results) (list (get-cell 'SourceTestInterface 'result)))
   (run)
   (show-state "--- Arity Test (0->1): After (should be 42) ---"))
 
@@ -47,8 +43,11 @@
    ((morphism log-it (in) -> ())
     (effect-scope 'logger
       (lambda (vals _)
-        (cons *nothing*
-              (list (make-effect 'display (format #f "Logger Sink: ~a\n" (car vals))))))))))
+        (let ((v (car vals)))
+          (if (eq? v #f)
+              (cons *nothing* '())
+              (cons *nothing*
+                    (list (make-effect 'display (format #f "Logger Sink: ~a\n" v)))))))))))
 
 (register-builder (make-category-builder
                    'logger
@@ -61,17 +60,13 @@
 
 (define-cpnet-system SinkTestSystem
   (SinkTestInterface)
-  (add-subsystem! (current-system) (apply-gate 'sink-impl))
-  (propagator p-setup
-    (list (get-builder 'logger) (get-cell 'SinkTestInterface 'input))
-    -> (list (get-cell 'sink-impl 'apply-interface 'code)
-             (get-cell 'sink-impl 'apply-interface 'args)
-             (get-cell 'sink-impl 'apply-interface 'results))
-    (lambda (vals srcs)
-      (cons (list (car vals) (list (cadr srcs)) '()) '()))))
+  (add-subsystem! (current-system) (apply-gate 'sink-impl)))
 
 (parameterize ((current-system (SinkTestSystem)))
   (show-state "--- Arity Test (1->0): Before ---")
+  (trigger (get-cell 'sink-impl 'apply-interface 'code) (get-builder 'logger))
+  (trigger (get-cell 'sink-impl 'apply-interface 'args) (list (get-cell 'SinkTestInterface 'input)))
+  (trigger (get-cell 'sink-impl 'apply-interface 'results) '())
   (trigger (get-cell 'SinkTestInterface 'input) "Hello Sink!")
   (run)
   (show-state "--- Arity Test (1->0): After (no changes, check console output) ---"))

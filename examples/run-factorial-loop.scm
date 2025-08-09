@@ -6,12 +6,12 @@
   #:use-module (cpnet sexp-loader)
   #:use-module (cpnet runtime))
 
-(define-object Data)
-
 ;; The interface for the system defined in the .cpet file
 (define-category TestLoopInterface
   (objects
    (instance final-val Data #f)))
+
+(register-builder (make-category-builder 'TestLoopInterface TestLoopInterface '()))
 
 ;; The body for the loop, calculates one step of a factorial
 (define-category factorial-body
@@ -48,11 +48,14 @@
             (cons (cadr p) '())
             (cons *nothing* '())))))))
 
+(register-builder (make-category-builder
+                   'get-second-from-pair
+                   get-second-from-pair
+                   '((inputs (pair)) (outputs (second)))))
+
 ;; --- Scenario ---
-(let ((system (load-system-from-file "examples/factorial-loop.cpet")))
+(let ((system (load-system-from-file "examples/factorial-loop.cpnet")))
   (parameterize ((current-system system))
     (show-state "--- Factorial Loop (from .cpet): Before ---")
-    (trigger (get-cell 'my-loop 'loop-interface 'body) (get-builder 'factorial-body))
-    (trigger (get-cell 'my-loop 'loop-interface 'output) '(5 1))
     (run)
     (show-state "Result should be 120")))

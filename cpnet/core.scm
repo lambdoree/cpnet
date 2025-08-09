@@ -38,8 +38,8 @@
   (builder-proc builder-function)
   (signature builder-signature))
 
-(define (make-category-builder name builder-proc . maybe-signature)
-  (make-category-builder-internal name builder-proc (if (null? maybe-signature) '() (car maybe-signature))))
+(define (make-category-builder name builder-proc signature)
+  (make-category-builder-internal name builder-proc signature))
 
 (define *builder-registry* (make-hash-table))
 (define (register-builder cb)
@@ -57,14 +57,34 @@
   (if (list? x) (map f x) (f x)))
 
 (define-record-type <lattice>
-  (make-lattice bottom join)
+  (make-lattice bottom join commutative? associative? idempotent? top)
   lattice?
   (bottom lattice-bottom)
-  (join lattice-join))
+  (join lattice-join)
+  (commutative? lattice-commutative?)
+  (associative? lattice-associative?)
+  (idempotent? lattice-idempotent?)
+  (top lattice-top))
 
 (define *lattice-registry* (make-hash-table))
-(define (register-lattice id bottom join-fn)
-  (hash-set! *lattice-registry* id (make-lattice bottom join-fn)))
+
+;;; Parse keyword arguments from a list like `('key1 val1 'key2 val2)
+(define (get-keyword-from-list key lst default)
+  (let ((tail (memq key lst)))
+    (if (and tail (pair? (cdr tail)))
+        (cadr tail)
+        default)))
+
+(define (register-lattice id . kwargs)
+  (let ((bottom (get-keyword-from-list 'bottom kwargs #f))
+        (join-fn (get-keyword-from-list 'join kwargs #f))
+        (comm (get-keyword-from-list 'commutative? kwargs #t))
+        (assoc (get-keyword-from-list 'associative? kwargs #t))
+        (idem (get-keyword-from-list 'idempotent? kwargs #t))
+        (top (get-keyword-from-list 'top-element kwargs #f)))
+    (if join-fn
+        (hash-set! *lattice-registry* id (make-lattice bottom join-fn comm assoc idem top))
+        (error "register-lattice requires a 'join function for" id))))
 
 (define-record-type <cell>
   (make-cell-record id type value lattice-id system)
@@ -99,8 +119,8 @@
 
 (define *nothing* (gensym "nothing"))
 
-(register-lattice 'Default #f
-		  (lambda (cell new-vals)
+(register-lattice 'Default 'bottom #f
+		  'join (lambda (cell new-vals)
 		    (let* ((old (cell-value cell))
 			   (unique-new-vals (delete-duplicates new-vals equal?)))
 		      (cond ((null? unique-new-vals) (cons old '()))
@@ -114,21 +134,23 @@
 						      (format #f "CONFLICT on cell ~a. Values: ~a. Reverting to bottom (#f).\n"
 							      (cell-id cell) new-vals)))))))))
 
-(register-lattice 'Replace #f
-		  (lambda (cell new-vals)
+(register-lattice 'Replace 'bottom #f
+		  'join (lambda (cell new-vals)
 		    (if (null? new-vals)
 			(cons (cell-value cell) '())
-			(cons (car new-vals) '()))))
+			(cons (car new-vals) '())))
+		  'commutative? #f
+		  'associative? #f)
 
-(register-lattice 'Set '()
-		  (lambda (cell new-vals)
+(register-lattice 'Set 'bottom '()
+		  'join (lambda (cell new-vals)
 		    (let ((current (let ((val (cell-value cell)))
 				     (if (list? val) val (if (not (eq? val #f)) (list val) '()))))
 			  (news (map (lambda (v) (if (list? v) v (if (not (eq? v #f)) (list v) '()))) new-vals)))
 		      (cons (delete-duplicates (apply append (cons current news)) equal?) '()))))
 
-(register-lattice 'Max *nothing*
-  (lambda (cell new-vals)
+(register-lattice 'Max 'bottom *nothing*
+  'join (lambda (cell new-vals)
     (if (null? new-vals)
         (cons (cell-value cell) '())
         (let ((numbers (filter number? new-vals)))
@@ -136,8 +158,8 @@
               (cons (cell-value cell) '())
               (cons (apply max numbers) '()))))))
 
-(register-lattice 'Min *nothing*
-  (lambda (cell new-vals)
+(register-lattice 'Min 'bottom *nothing*
+  'join (lambda (cell new-vals)
     (if (null? new-vals)
         (cons (cell-value cell) '())
         (let ((numbers (filter number? new-vals)))
@@ -145,8 +167,8 @@
               (cons (cell-value cell) '())
               (cons (apply min numbers) '()))))))
 
-(register-lattice 'Bool #f
-  (lambda (cell new-vals)
+(register-lattice 'Bool 'bottom #f
+  'join (lambda (cell new-vals)
     (if (null? new-vals)
         (cons (cell-value cell) '())
         (let ((bool-vals (filter boolean? new-vals)))
@@ -154,8 +176,8 @@
               (cons (cell-value cell) '())
               (cons (any identity bool-vals) '()))))))
 
-(register-lattice 'Maybe *nothing*
-  (lambda (cell new-vals)
+(register-lattice 'Maybe 'bottom *nothing*
+  'join (lambda (cell new-vals)
     (let ((defined-vals (filter (lambda (v) (not (eq? v *nothing*))) new-vals)))
       (cond
        ((null? defined-vals) (cons *nothing* '()))
@@ -163,6 +185,8 @@
        (else (cons (car defined-vals)
                    (list (make-effect 'display
                                       (format #f "CONFLICT on Maybe cell ~a. Values: ~a. Taking first value.\n"
-                                              (cell-id cell) defined-vals)))))))))
+                                              (cell-id cell) defined-vals))))))))
+  'commutative? #f
+  'associative? #f)
 
 

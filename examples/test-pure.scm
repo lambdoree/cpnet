@@ -5,11 +5,6 @@
   #:use-module (cpnet apply)
   #:use-module (cpnet system))
 
-(define-object Code)
-(define-object Data)
-(define-object Bool)
-(define-object category-builder)
-
 (define true-gate-builder  (get-builder 'true-gate))
 (define false-gate-builder (get-builder 'false-gate))
 

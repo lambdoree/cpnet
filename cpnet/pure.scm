@@ -17,15 +17,15 @@
             try-catch-system
             try-catch-interface))
 
-(register-lattice 'Select-Non-F #f
-  (lambda (cell new-vals)
+(register-lattice 'Select-Non-F 'bottom #f
+  'join (lambda (cell new-vals)
     (let ((filtered-vals (filter (lambda (v) (not (eq? v #f))) new-vals)))
       (if (null? filtered-vals)
           (cons #f '())
           ((cell-merge-fn (make-cell 'dummy 'dummy #f 'Default)) cell filtered-vals)))))
 
-(register-lattice 'Ignore-F #f
-  (lambda (cell new-vals)
+(register-lattice 'Ignore-F 'bottom #f
+  'join (lambda (cell new-vals)
     (let ((filtered-vals (filter (lambda (v) (not (eq? v #f))) new-vals)))
       (if (null? filtered-vals)
           (cons (cell-value cell) '())
@@ -59,10 +59,6 @@
   (objects
    (instance f Data #f)))
 
-(define-object Data)
-(define-object Bool)
-(define-object category-builder)
-
 (define-category true-gate
   (objects
    (instance X Data #f 'Replace)
@@ -73,11 +69,10 @@
     (lambda (vals _)
       (cons (car vals) '())))))
 
-(hash-set! *builder-registry* 'true-gate
-           (make-category-builder
-            'true-gate
-            true-gate
-            '((inputs (X Y)) (outputs (Z)))))
+(register-builder (make-category-builder
+                   'true-gate
+                   true-gate
+                   '((inputs (X Y)) (outputs (Z)))))
 
 (define-category false-gate
   (objects
@@ -89,11 +84,10 @@
     (lambda (vals _)
       (cons (cadr vals) '())))))
 
-(hash-set! *builder-registry* 'false-gate
-           (make-category-builder
-            'false-gate
-            false-gate
-            '((inputs (X Y)) (outputs (Z)))))
+(register-builder (make-category-builder
+                   'false-gate
+                   false-gate
+                   '((inputs (X Y)) (outputs (Z)))))
 
 (define-category is-f-interface
   (objects
@@ -114,32 +108,26 @@
 
 (define-category if-interface
   (objects
-   (instance condition category-builder #f 'Replace)
+   (instance condition Bool #f 'Replace)
    (instance then-val Data #f 'Replace)
    (instance else-val Data #f 'Replace)
-   (instance result Data #f 'Select-Non-F)))
+   (instance result Data #f 'Replace)))
 
 (define-cpnet-system if-system
   (if-interface)
-  (add-subsystem! (current-system) (apply-gate 'if-impl))
-
-  (wire (get-cell 'if-interface 'condition) (get-cell 'if-impl 'apply-interface 'code))
-
-  (propagator if-system-arg-setup
-              (list (get-cell 'if-interface 'then-val) (get-cell 'if-interface 'else-val))
-              -> (get-cell 'if-impl 'apply-interface 'args)
-              (lambda (vals srcs) (cons srcs '())))
-
-  (propagator if-system-result-setup
-              (get-cell 'if-interface 'result) ; dummy src
-              -> (get-cell 'if-impl 'apply-interface 'results)
-              (lambda (vals srcs) (cons (list srcs) '()))))
+  (system-add-propagator! (current-system)
+    (make-branch-propagator
+     'p-if
+     (get-cell 'if-interface 'condition)
+     (get-cell 'if-interface 'then-val)
+     (get-cell 'if-interface 'else-val)
+     (get-cell 'if-interface 'result))))
 
 (define-category gated-channel-interface
   (objects
-   (instance control category-builder #f)
+   (instance control category-builder #f 'Replace)
    (instance input Data #f)
-   (instance output Data #f)))
+   (instance output Data #f 'Replace)))
 
 (define-cpnet-system gated-channel-system
   (gated-channel-interface)
@@ -302,7 +290,7 @@
       (let ((try-res (car vals))
             (is-err? (cadr vals)))
         (if is-err?
-            (cons #f '()) ; if error, let catch-impl write to result
+            (cons *nothing* '()) ; if error, let catch-impl write to result
             (cons try-res '()) ; if no error, pass try-result through
             )))))
 

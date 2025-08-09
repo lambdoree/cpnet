@@ -6,8 +6,6 @@
   #:use-module (cpnet sexp-loader)
   #:use-module (cpnet runtime))
 
-(define-object Data)
-
 (define-category factorial-body
   (objects
    (instance X Data #f)
@@ -24,11 +22,10 @@
             (cons state '())))))))
 
 ;; Manually register the builder with a signature for the new apply-gate.
-(hash-set! *builder-registry* 'factorial-body
-           (make-category-builder
-            'factorial-body
-            factorial-body
-            '((inputs (X Y)) (outputs (Z)))))
+(register-builder (make-category-builder
+                   'factorial-body
+                   factorial-body
+                   '((inputs (X Y)) (outputs (Z)))))
 
 (define-category get-second-from-pair
   (objects

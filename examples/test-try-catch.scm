@@ -23,7 +23,11 @@
   (objects (instance X Data #f) (instance Y Data #f))
   (morphisms
    ((morphism double (X) -> Y)
-    (lambda (vals _) (cons (* (car vals) 2) '())))))
+    (lambda (vals _)
+      (let ((n (car vals)))
+        (if (number? n)
+            (cons (* n 2) '())
+            (cons *nothing* '())))))))
 (register-builder (make-category-builder 'double-body double-body '((inputs (X)) (outputs (Y)))))
 
 ;; A handler for errors
@@ -32,9 +36,13 @@
   (morphisms
    ((morphism handle (E) -> R)
     (effect-scope 'error-handler-body
-      (lambda (vals _)
-        (display (format #f "Caught error: ~a, returning -1\n" (car vals)))
-        (cons -1 '()))))))
+		  (lambda (vals _)
+		    (let ((err-payload (car vals)))
+		      (if err-payload
+			  (begin
+			    (display (format #f "Caught error: ~a, returning -1\n" err-payload))
+			    (cons -1 '()))
+			  (cons *nothing* '()))))))))
 (register-builder (make-category-builder 'error-handler-body error-handler-body '((inputs (E)) (outputs (R)))))
 
 (define-category TryCatchTestInterface

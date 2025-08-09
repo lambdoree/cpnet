@@ -307,8 +307,7 @@
                        (parameterize ((current-system sys)) (body sys)))
                      (let ((new-system (make-system (car maybe-name))))
                        (parameterize ((current-system new-system)) (body new-system))
-                       new-system))))
-             (register-builder (make-category-builder 'the-name name '()))))]
+                       new-system))))))]
       ;; objects-only
       [(_ name (objects inst-def ...))
        (with-syntax ([the-name #'name]
@@ -327,8 +326,7 @@
                        (parameterize ((current-system sys)) (body sys)))
                      (let ((new-system (make-system (car maybe-name))))
                        (parameterize ((current-system new-system)) (body new-system))
-                       new-system))))
-             (register-builder (make-category-builder 'the-name name '()))))])))
+                       new-system))))))])))
 
 (define-syntax define-connections
   (syntax-rules (propagator connector)
@@ -354,7 +352,7 @@
                    (parameterize ((current-system new-system))
                      (let () . body))
                    new-system)))
-             (register-builder (make-category-builder 'the-name name))))])))
+             (register-builder (make-category-builder 'the-name name '()))))])))
 
 
 (define-syntax compose-systems
@@ -376,7 +374,29 @@
 
 (define-syntax run
   (lambda (stx)
-    #'(runtime-settle! (current-system))))
+    #'(let ((sys (current-system)))
+        (let loop ((n 0))
+          (if (< n 100)
+              (let-values (((trace effects) (runtime-settle! sys)))
+                (if (null? effects)
+                    trace
+                    (let* ((structural-effects
+                            (filter (lambda (e)
+                                      (memq (effect-type e)
+                                            '(add-subsystem remove-subsystem add-morphisms)))
+                                    effects))
+                           (other-effects
+                            (filter (lambda (e)
+                                      (not (memq (effect-type e)
+                                                 '(add-subsystem remove-subsystem add-morphisms))))
+                                    effects)))
+                      (runtime-execute-effects other-effects sys)
+                      (if (null? structural-effects)
+                          trace
+                          (begin
+                            (runtime-execute-effects structural-effects sys)
+                            (loop (+ n 1)))))))
+              (error "run: System did not stabilize after 100 structural changes."))))))
 
 (define-syntax-rule (show-state msg)
   (runtime-show-state (current-system) msg))

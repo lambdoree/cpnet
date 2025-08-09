@@ -8,10 +8,6 @@
   #:use-module (srfi srfi-1)
   )
 
-(define-object Temperature)
-(define-object Precipitation)
-(define-object Flag)
-
 (define-category weather-station
   (objects
    (instance outside_temp Temperature 78 default-merge-fn)
@@ -25,12 +21,6 @@
       (let ((temp (car vals))
 	    (prec (cadr vals)))
         (cons (list (eq? prec 'rain) (< temp 65)) '()))))))
-
-(define-object TimeOfDay)
-(define-object HomeStatus)
-(define-object LightStatus)
-(define-object ThermostatSetting)
-(define-object SecurityStatus)
 
 (define-category home-automation
   (objects
@@ -77,9 +67,6 @@
                   (if (or home? guests?)
                       (cons #f '())
                       (cons #t '()))))))
-
-(define-object DisplayString)
-(define-object Power)
 
 (define-category guest_mode
   (objects

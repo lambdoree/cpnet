@@ -8,6 +8,8 @@
   #:use-module (cpnet system)
   #:export (
             current-system
+            *oscillation-mode*
+            *deterministic-execution*
 	    runtime-settle!
 	    runtime-step!
 	    runtime-execute-effects
@@ -21,6 +23,8 @@
             tx-effects))
 
 (define current-system (make-parameter #f))
+(define *oscillation-mode* (make-parameter 'warn)) ;; 'warn or 'error
+(define *deterministic-execution* (make-parameter #t)) ;; #t for sorted, #f for shuffled
 
 (define VALIDATE_ON_EFFECTS #t)
 (define MAX_STEPS 1000)
@@ -111,6 +115,18 @@
         (error "Category axiom violated after effects.")))
     (values changed? (delete-duplicates activated-cells))))
 
+;; Fisher-Yates shuffle for lists
+(define (list-shuffle lst)
+  (let ((vec (list->vector lst)))
+    (let loop ((i (- (vector-length vec) 1)))
+      (if (> i 0)
+          (let* ((j (random (+ i 1)))
+                 (tmp (vector-ref vec i)))
+            (vector-set! vec i (vector-ref vec j))
+            (vector-set! vec j tmp)
+            (loop (- i 1)))
+          (vector->list vec)))))
+
 (define (_runtime-snapshot system)
   (let* ((net (get-net system))
          (objs (cat:category-objects net))
@@ -152,9 +168,16 @@
                                                   (any (lambda (d) (member d active-cells eq?)) dom)
                                                   (member dom active-cells)))))
                                       compute-mors)))
-           (sorted-mors (sort relevant-mors
-                              (lambda (a b) (> (cat:arrow-priority a)
-                                               (cat:arrow-priority b))))))
+           (execution-order-mors (if (*deterministic-execution*)
+                                     (sort relevant-mors
+                                           (lambda (a b)
+                                             (let ((pa (cat:arrow-priority a))
+                                                   (pb (cat:arrow-priority b)))
+                                               (if (= pa pb)
+                                                   (string<? (symbol->string (cat:arrow-id a))
+                                                             (symbol->string (cat:arrow-id b)))
+                                                   (> pa pb)))))
+                                     (list-shuffle relevant-mors))))
       (for-each
        (lambda (m)
          (let* ((srcs (cat:arrow-dom m))
@@ -173,7 +196,7 @@
                       (prop-val (car result))
                       (prop-effects (cdr result)))
                  (when (not (null? prop-effects))
-                   (set! effects (append prop-effects effects)))
+                   (set! effects (append effects prop-effects)))
                  (when (not (eq? prop-val core:*nothing*))
                    (if (list? tgts)
                        (if (and (list? prop-val) (= (length prop-val) (length tgts)))
@@ -187,7 +210,7 @@
                        (when tgts
                          (let ((current (hash-ref potential-updates tgts '())))
                            (hash-set! potential-updates tgts (cons prop-val current)))))))))))
-       sorted-mors))
+       execution-order-mors))
     (values potential-updates effects (reverse executed-mors))))
 
 (define (_runtime-apply-updates potential-updates)
@@ -219,34 +242,46 @@
       (let-values (((changed-by-merge? merge-effects changed-cells)
                     (_runtime-apply-updates potential-updates)))
         (let* ((effects-this-pass (append propagator-effects merge-effects)))
-          (let-values (((changed-by-plain-effects? activated-by-effects) (runtime-execute-effects effects-this-pass system)))
-            (values (or changed-by-merge? changed-by-plain-effects?)
-                    executed-mors
-                    (delete-duplicates (append changed-cells activated-by-effects)))))))))
+          (values changed-by-merge?
+                  executed-mors
+                  changed-cells
+                  effects-this-pass))))))
 
 (define (runtime-settle! system-or-net)
-  ;; First step is a full evaluation to find initial changes.
-  (let-values (((changed? initial-trace changed-cells) (runtime-step! system-or-net #f)))
-    ;; Now loop, propagating changes until a fixed point is reached.
-    (let loop ((n 0)
-               (changed? changed?)
-               (full-trace initial-trace)
-               (active-cells changed-cells)
-               (history (list (_runtime-snapshot system-or-net))))
-      (if (and changed? (< n MAX_STEPS))
-          (let-values (((step-changed? step-trace step-changed-cells)
-                        (runtime-step! system-or-net active-cells)))
-            (let ((snapshot (_runtime-snapshot system-or-net)))
-              (if (member snapshot history equal?)
-                  (begin
-                    (format (current-error-port) "Warning: runtime-settle! detected an oscillation at step ~a.\n" (+ n 1))
-                    (reverse (append full-trace step-trace)))
-                  (loop (+ n 1)
-                        step-changed?
-                        (append full-trace step-trace)
-                        step-changed-cells
-                        (cons snapshot history)))))
-          (begin
-            (when (and changed? (>= n MAX_STEPS))
-              (format (current-error-port) "Warning: runtime-settle! reached MAX_STEPS (~a) and did not converge.\n" MAX_STEPS))
-            (reverse full-trace))))))
+  (let ((all-effects '()))
+    (let-values (((changed? initial-trace changed-cells effects) (runtime-step! system-or-net #f)))
+      (set! all-effects (append all-effects effects))
+      (let loop ((n 0)
+                 (changed? changed?)
+                 (full-trace initial-trace)
+                 (active-cells changed-cells)
+                 (history (list (_runtime-snapshot system-or-net))))
+        (if (and changed? (< n MAX_STEPS))
+            (let-values (((step-changed? step-trace step-changed-cells step-effects)
+                          (runtime-step! system-or-net active-cells)))
+              (set! all-effects (append all-effects step-effects))
+              (if (not step-changed?)
+                  ;; System has converged, terminate loop.
+                  (loop (+ n 1) #f (append full-trace step-trace) '() history)
+                  ;; System has changed, check for oscillation.
+                  (let ((snapshot (_runtime-snapshot system-or-net)))
+                    (if (member snapshot history equal?)
+                        (let ((step-num (+ n 1)))
+                          (cond
+                           ((eq? (*oscillation-mode*) 'error)
+                            (error 'oscillation-detected (format #f "at step ~a" step-num)))
+                           ((eq? (*oscillation-mode*) 'warn)
+                            (begin
+                              (format (current-error-port) "Warning: runtime-settle! detected an oscillation at step ~a.\n" step-num)
+                              (values (reverse (append full-trace step-trace)) all-effects)))
+                           (else
+                            (error 'unknown-oscillation-mode (*oscillation-mode*)))))
+                        (loop (+ n 1)
+                              step-changed?
+                              (append full-trace step-trace)
+                              step-changed-cells
+                              (cons snapshot history))))))
+            (begin
+              (when (and changed? (>= n MAX_STEPS))
+                (format (current-error-port) "Warning: runtime-settle! reached MAX_STEPS (~a) and did not converge.\n" MAX_STEPS))
+              (values (reverse full-trace) all-effects)))))))

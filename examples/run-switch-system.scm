@@ -13,6 +13,8 @@
    (instance default-data Data 'default)
    (instance output Data #f 'Replace)))
 
+(register-builder (make-category-builder 'TestSwitchInterface TestSwitchInterface '()))
+
 (let ((system (load-system-from-file "examples/test-switch-system.cpnet")))
   (parameterize ((current-system system))
     (show-state "--- Test SEXP SWITCH: Before (key=bar) ---")

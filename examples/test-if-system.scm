@@ -2,10 +2,8 @@
   #:use-module (cpnet dsl)
   #:use-module (cpnet core)
   #:use-module (cpnet pure)
-  #:use-module (cpnet system))
-
-(define-object Data)
-(define-object Bool)
+  #:use-module (cpnet system)
+  #:use-module (cpnet runtime))
 
 (define-category TestIfInterface
   (objects

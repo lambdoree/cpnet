@@ -24,3 +24,25 @@
   (show-state "--- Test Oscillation: Before ---")
   (run)
   (show-state "--- Test Oscillation: After ---"))
+
+(display "\n--- [Testing Oscillation Error Mode] ---\n")
+(let ((err #f))
+  (catch #t
+    (lambda ()
+      (parameterize ((current-system (TestOscillation))
+                     (*oscillation-mode* 'error))
+        (run)))
+    (lambda (key . args)
+      (set! err (cons key args))))
+  (if err
+      (begin
+        (format #t "Caught expected error: ~s\n" err)
+        (let ((original-err (if (eq? (car err) 'misc-error)
+                                (if (> (length err) 3) (car (cdddr err)) err)
+                                err)))
+          (if (and (list? original-err)
+                   (> (length original-err) 0)
+                   (eq? (car original-err) 'oscillation-detected))
+              (display "OK: Error key is correct.\n")
+              (display "FAIL: Error key is incorrect.\n"))))
+      (format (current-error-port) "FAIL: Did not catch expected oscillation error!\n")))

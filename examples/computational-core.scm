@@ -4,9 +4,6 @@
   #:use-module (cpnet conditional)
   #:use-module (cpnet iteration))
 
-(define-object Bool)
-(define-object Data)
-
 ;;;
 ;;; 1. Application-specific data
 ;;;
