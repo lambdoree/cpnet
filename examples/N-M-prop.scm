@@ -10,10 +10,10 @@
 
 (define-category weather-station
   (objects
-   (instance outside_temp Temperature 78 default-merge-fn)
-   (instance precipitation Precipitation 'none default-merge-fn)
-   (instance get-umb Flag #f default-merge-fn)
-   (instance jacket_needed Flag #f default-merge-fn))
+   (instance outside_temp Temperature 78)
+   (instance precipitation Precipitation 'none)
+   (instance get-umb Flag #f)
+   (instance jacket_needed Flag #f))
   (morphisms
    ;; N:N propagator example
    ((morphism clothing_advice (outside_temp precipitation) -> (get-umb jacket_needed))
@@ -24,12 +24,12 @@
 
 (define-category home-automation
   (objects
-   (instance time_of_day TimeOfDay 'day default-merge-fn)
-   (instance is_home HomeStatus #f default-merge-fn)
-   (instance lights_on LightStatus #f default-merge-fn)
-   (instance thermostat_setting ThermostatSetting 'eco default-merge-fn)
-   (instance security_armed SecurityStatus #t default-merge-fn)
-   (instance power_save_mode Flag #f replace-merge-fn))
+   (instance time_of_day TimeOfDay 'day)
+   (instance is_home HomeStatus #f)
+   (instance lights_on LightStatus #f)
+   (instance thermostat_setting ThermostatSetting 'eco)
+   (instance security_armed SecurityStatus #t)
+   (instance power_save_mode Flag #f))
   (morphisms
    ((morphism light_control (time_of_day is_home) -> lights_on)
     (lambda (vals src)
@@ -70,12 +70,12 @@
 
 (define-category guest_mode
   (objects
-   (instance active Flag #f default-merge-fn)))
+   (instance active Flag #f)))
 
 (define-category alert_panel
   (objects
-   (instance alert_message DisplayString "System Nominal" replace-merge-fn)
-   (instance siren_on Flag #f replace-merge-fn))
+   (instance alert_message DisplayString "System Nominal")
+   (instance siren_on Flag #f))
   (morphisms
    ((morphism alert->siren alert_message -> siren_on)
     (lambda (vals _)
@@ -101,11 +101,11 @@
 
 (define-category display_panel
   (objects
-   (instance home_status_simple DisplayString "EMPTY" replace-merge-fn)
-   (instance home_status_verbose DisplayString "House is Vacant" replace-merge-fn)
-   (instance executive_summary DisplayString "UNKNOWN" replace-merge-fn)
-   (instance weather_status DisplayString "CLEAR" replace-merge-fn)
-   (instance power_consumption Power 0 max-merge-fn))
+   (instance home_status_simple DisplayString "EMPTY")
+   (instance home_status_verbose DisplayString "House is Vacant")
+   (instance executive_summary DisplayString "UNKNOWN")
+   (instance weather_status DisplayString "CLEAR")
+   (instance power_consumption Power 0))
   (morphisms
    ((morphism simple->verbose_translator home_status_simple -> home_status_verbose)
     (lambda (vals _)
