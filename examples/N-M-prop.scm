@@ -6,7 +6,6 @@
   #:use-module (cpnet functor)
   #:use-module (cpnet nt)
   #:use-module (cpnet system)
-  #:use-module (cpnet runtime)
   #:use-module (cpnet runtime stepper)
   #:use-module (cpnet runtime state)
   #:use-module (ice-9 match)
@@ -259,17 +258,6 @@
  (systems SmartHomeSystem display-panel-system)
  (connections
   (display-compute-connections)
-  (propagator weather-status-prop
-    (get-cell 'SmartHomeSystem.weather-station 'precipitation)
-    ->
-    (get-cell 'display-panel-system.display_panel 'weather_status)
-    (icnu
-     (nu (is-rain lit-warn lit-clear)
-         (par
-          (IC_EQ_CONST 'rain SmartHomeSystem.weather-station.precipitation is-rain)
-          (IC_LITERAL "WARNING" lit-warn)
-          (IC_LITERAL "CLEAR" lit-clear)
-          (IC_IF is-rain (list lit-warn 'r) (list lit-clear 'r) out)))))
   (propagator home-status-prop
     (get-cell 'SmartHomeSystem.home-automation 'is_home)
     ->
