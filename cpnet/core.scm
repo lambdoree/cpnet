@@ -2,6 +2,7 @@
   #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-9)
   #:use-module (ice-9 hash-table)
+  #:use-module (cpnet log)
   #:export (
 	    cell?
 	    make-cell
@@ -18,6 +19,7 @@
 	    effect-type
 	    effect-payload
             *nothing*
+            *unresolved*
             map-maybe
             category-builder?
             make-category-builder
@@ -28,7 +30,6 @@
 	    register-lattice
 	    builder-signature
             get-builder
-            define-object
             ))
 
 (define-record-type <category-builder>
@@ -38,21 +39,20 @@
   (builder-proc builder-function)
   (signature builder-signature))
 
+;; category-builder 레코드를 생성합니다.
 (define (make-category-builder name builder-proc signature)
   (make-category-builder-internal name builder-proc signature))
 
 (define *builder-registry* (make-hash-table))
+;; category-builder를 전역 레지스트리에 등록합니다.
 (define (register-builder cb)
   (hash-set! *builder-registry* (builder-name cb) cb))
+;; 이름으로 category-builder를 레지스트리에서 찾습니다.
 (define (get-builder name)
   (hash-ref *builder-registry* name
             (lambda () (error "Unknown category:" name))))
 
-(define-syntax-rule (define-object name) (begin))
-
-(define-object Code)
-(define-object category-builder)
-
+;; 단일 아이템 또는 리스트의 모든 아이템에 함수를 적용합니다.
 (define (map-maybe f x)
   (if (list? x) (map f x) (f x)))
 
@@ -68,13 +68,14 @@
 
 (define *lattice-registry* (make-hash-table))
 
-;;; Parse keyword arguments from a list like `('key1 val1 'key2 val2)
+;;; `('key1 val1 'key2 val2)`와 같은 리스트에서 키워드 인자를 파싱합니다.
 (define (get-keyword-from-list key lst default)
   (let ((tail (memq key lst)))
     (if (and tail (pair? (cdr tail)))
         (cadr tail)
         default)))
 
+;; 주어진 속성으로 lattice를 생성하여 전역 레지스트리에 등록합니다.
 (define (register-lattice id . kwargs)
   (let ((bottom (get-keyword-from-list 'bottom kwargs #f))
         (join-fn (get-keyword-from-list 'join kwargs #f))
@@ -95,6 +96,7 @@
   (lattice-id cell-lattice-id)
   (system cell-system set-cell-system!))
 
+;; cell의 lattice ID에 해당하는 병합(join) 함수를 반환합니다.
 (define (cell-merge-fn cell)
   (let ((l (hash-ref *lattice-registry* (cell-lattice-id cell))))
     (if l (lattice-join l) (error "Lattice not found" (cell-lattice-id cell)))))
@@ -105,19 +107,24 @@
   (type effect-type)
   (payload effect-payload))
 
+;; 새로운 cell 레코드를 생성합니다. lattice ID가 제공되지 않으면 'Default'를 사용합니다.
 (define (make-cell id type init-val . maybe-lattice-id)
   (let ((lattice-id (if (null? maybe-lattice-id) 'Default (car maybe-lattice-id))))
     (make-cell-record id type init-val lattice-id #f)))
 
+;; cell의 값을 설정하고 cell 자체를 반환합니다.
 (define (cell-set-value! c new-val)
   (set-cell-value! c new-val)
   c)
 
+;; cell이 속한 시스템을 설정하고 cell 자체를 반환합니다.
 (define (cell-set-system! c new-sys)
   (set-cell-system! c new-sys)
   c)
 
 (define *nothing* (gensym "nothing"))
+
+(define *unresolved* (gensym "unresolved"))
 
 (register-lattice 'Default 'bottom #f
 		  'join (lambda (cell new-vals)
@@ -129,10 +136,10 @@
 			    ((= 1 (length unique-new-vals))
 			     (cons (car unique-new-vals) '()))
 			    (else
-			     (cons #f
-				   (list (make-effect 'display
-						      (format #f "CONFLICT on cell ~a. Values: ~a. Reverting to bottom (#f).\n"
-							      (cell-id cell) new-vals)))))))))
+			     (begin
+			       (warnf "CONFLICT on cell ~a. Values: ~s. Reverting to bottom (#f).\n"
+				      (cell-id cell) new-vals)
+			       (cons #f '())))))))
 
 (register-lattice 'Replace 'bottom #f
 		  'join (lambda (cell new-vals)

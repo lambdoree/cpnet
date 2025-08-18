@@ -17,6 +17,11 @@
             try-catch-system
             try-catch-interface))
 
+;; propagator 함수: 소스 값들을 그대로 전달합니다.
+(define (pass-as-is vals srcs) (cons srcs '()))
+;; propagator 함수: 소스 값들을 하나의 리스트로 묶어 전달합니다.
+(define (pass-as-list vals srcs) (cons (list srcs) '()))
+
 (register-lattice 'Select-Non-F 'bottom #f
   'join (lambda (cell new-vals)
     (let ((filtered-vals (filter (lambda (v) (not (eq? v #f))) new-vals)))
@@ -45,10 +50,10 @@
           (get-cell 'branch-on-f-interface 'then-val)
           (get-cell 'branch-on-f-interface 'else-val))
     -> (get-cell 'branch-on-f-interface 'out)
-    (lambda (vals _)
-      (if (eq? (car vals) #f)
-          (cons (cadr vals) '())
-          (cons (caddr vals) '())))))
+    (icnu
+     (par
+      ;; out = IF in THEN then-val ELSE else-val
+      (IC_IF branch-on-f-interface.in (list branch-on-f-interface.then-val 'p) (list branch-on-f-interface.else-val 'p) out))))
 
 (define-category const-bool-provider
   (objects
@@ -66,8 +71,10 @@
    (instance Z Data #f 'Replace))
   (morphisms
    ((morphism select-left (X Y) -> Z)
-    (lambda (vals _)
-      (cons (car vals) '())))))
+    (icnu
+     (par
+      (mk-node out 'A)
+      (mk-wire true-gate.X 'p out 'p)))))
 
 (register-builder (make-category-builder
                    'true-gate
@@ -81,8 +88,10 @@
    (instance Z Data #f 'Replace))
   (morphisms
    ((morphism select-right (X Y) -> Z)
-    (lambda (vals _)
-      (cons (cadr vals) '())))))
+    (icnu
+     (par
+      (mk-node out 'A)
+      (mk-wire false-gate.Y 'p out 'p)))))
 
 (register-builder (make-category-builder
                    'false-gate
@@ -140,12 +149,12 @@
               (list (get-cell 'gated-channel-interface 'input)
                     (get-cell 'const-f 'const-f-provider 'f))
               -> (get-cell 'gate-impl 'apply-interface 'args)
-              (lambda (vals srcs) (cons srcs '())))
+              pass-as-is)
   
   (propagator gated-channel-result-setup
               (get-cell 'gated-channel-interface 'output)
               -> (get-cell 'gate-impl 'apply-interface 'results)
-              (lambda (vals srcs) (cons (list srcs) '()))))
+              pass-as-list))
 
 (define-category is-not-f-interface
   (objects
@@ -194,12 +203,12 @@
   (propagator loop-system-arg-setup
               (list (get-cell 'loop-interface 'input) (get-cell 'loop-interface 'output))
               -> (get-cell 'apply-body 'apply-interface 'args)
-              (lambda (vals srcs) (cons srcs '())))
+              pass-as-is)
   
   (propagator loop-system-result-setup
               (get-cell 'internal 'loop-internal-interface 'temp-result)
               -> (get-cell 'apply-body 'apply-interface 'results)
-              (lambda (vals srcs) (cons (list srcs) '()))))
+              pass-as-list))
 
 (define-category switch-interface
   (objects
@@ -208,6 +217,17 @@
    (instance default Data #f)
    (instance result Data #f)))
 
+;; `switch-system`을 위한 핸들러 함수.
+;; `key`에 해당하는 `cases`를 찾아 값을 반환하고, 없으면 `default` 값을 반환합니다.
+(define (switch-handler vals _)
+  (let* ((key     (car vals))
+         (cases   (cadr vals))
+         (default (caddr vals))
+         (found   (and (list? cases) (assoc key cases))))
+    (if found
+        (cons (cdr found) '())
+        (cons default '()))))
+
 (define-cpnet-system switch-system
   (switch-interface)
   (propagator p-switch
@@ -215,17 +235,12 @@
                     (get-cell 'switch-interface 'cases)
                     (get-cell 'switch-interface 'default))
               -> (get-cell 'switch-interface 'result)
-              (lambda (vals _)
-                (let* ((key     (car vals))
-                       (cases   (cadr vals))
-                       (default (caddr vals))
-                       (found   (and (list? cases) (assoc key cases))))
-                  (if found
-                      (cons (cdr found) '())
-                      (cons default '()))))))
+              switch-handler))
 
+;; 값이 `(error . payload)` 형태의 에러 값인지 확인합니다.
 (define (is-error? val)
   (and (pair? val) (eq? (car val) 'error)))
+;; 에러 값에서 실제 payload를 추출합니다.
 (define (error-payload val)
   (cdr val))
 
@@ -250,47 +265,55 @@
 
   ;; Wire up try-body
   (wire (get-cell 'try-catch-interface 'try-body) (get-cell 'try-impl 'apply-interface 'code))
+;; Named helpers to avoid inline lambda propagators in try-catch wiring.
+;; `try-catch-system`의 최종 결과를 라우팅하는 핸들러.
+;; 에러가 발생하면 `catch-impl`이 결과를 쓰도록 하고, 아니면 `try-impl`의 결과를 전달합니다.
+(define (route-final-handler vals _)
+  (let ((try-res (car vals))
+        (is-err? (cadr vals)))
+    (if is-err?
+        (cons *nothing* '()) ; if error, let catch-impl write to result
+        (cons try-res '()))))
+
+;; Handler to check for error payloads and emit the is-error / error-payload pair.
+;; 에러 페이로드를 확인하고, `is-error` 플래그와 `error-payload` 쌍을 방출하는 핸들러.
+(define (check-error-handler vals _)
+  (let ((res (car vals)))
+    (if (is-error? res)
+        (cons (list #t (error-payload res)) '())
+        (cons (list #f #f) '()))))
+
   (propagator setup-try-args
     (get-cell 'try-catch-interface 'body-in)
     -> (get-cell 'try-impl 'apply-interface 'args)
-    (lambda (vals srcs) (cons (list srcs) '())))
+    pass-as-list)
   (propagator setup-try-results
     (get-cell 'internal-cells 'try-result)
     -> (get-cell 'try-impl 'apply-interface 'results)
-    (lambda (vals srcs) (cons (list srcs) '())))
+    pass-as-list)
 
-  ;; Check for error
+  ;; Check for error (named handler)
   (propagator check-error
     (get-cell 'internal-cells 'try-result)
     -> (list (get-cell 'internal-cells 'is-error)
              (get-cell 'internal-cells 'error-payload))
-    (lambda (vals _)
-      (let ((res (car vals)))
-        (if (is-error? res)
-            (cons (list #t (error-payload res)) '())
-            (cons (list #f #f) '())))))
+    check-error-handler)
 
   ;; Wire up catch-body
   (wire (get-cell 'try-catch-interface 'catch-body) (get-cell 'catch-impl 'apply-interface 'code))
   (propagator setup-catch-args
     (get-cell 'internal-cells 'error-payload)
     -> (get-cell 'catch-impl 'apply-interface 'args)
-    (lambda (vals srcs) (cons (list srcs) '())))
+    pass-as-list)
   (propagator setup-catch-results
     (get-cell 'try-catch-interface 'result)
     -> (get-cell 'catch-impl 'apply-interface 'results)
-    (lambda (vals srcs) (cons (list srcs) '())))
+    pass-as-list)
 
   ;; Route final result
   (propagator route-final
     (list (get-cell 'internal-cells 'try-result)
           (get-cell 'internal-cells 'is-error))
     -> (get-cell 'try-catch-interface 'result)
-    (lambda (vals _)
-      (let ((try-res (car vals))
-            (is-err? (cadr vals)))
-        (if is-err?
-            (cons *nothing* '()) ; if error, let catch-impl write to result
-            (cons try-res '()) ; if no error, pass try-result through
-            )))))
+    route-final-handler)
 

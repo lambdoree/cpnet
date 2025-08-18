@@ -10,7 +10,7 @@ all: build
 
 build:
 	@echo "Compiling all cpnet modules..."
-	guile -L . -c '(use-modules (cpnet category) (cpnet core) (cpnet functor) (cpnet nt) (cpnet runtime))'
+	guile -L . -c '(use-modules (cpnet category) (cpnet core) (cpnet functor) (cpnet nt))'
 
 install: build
 	@echo "Installing only .scm files to $(DESTDIR)$(GUILE_SITEDIR)/$(PROJECT)"

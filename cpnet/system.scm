@@ -5,7 +5,8 @@
   #:use-module ((cpnet core) :prefix core:)
   #:use-module ((cpnet category) :prefix cat:)
   #:use-module ((cpnet functor) :prefix fun:)
-  #:export (make-system
+  #:export (substitute-symbols-in-body
+            make-system
             system?
             system-name
             system-get-net
@@ -22,6 +23,7 @@
             system-nts
             system-add-functor!
             system-add-nt!
+            system-find-cell-by-id
             system-remove-subsystem!
             add-subsystem!
             propagator?
@@ -43,6 +45,20 @@
   (functors system-functors system-set-functors!)
   (nts system-nts system-set-nts!))
 
+;; S-expression 본문 내의 심볼들을 `id-map`에 따라 재귀적으로 치환합니다.
+(define (substitute-symbols-in-body body id-map)
+  (letrec ((walk (lambda (form)
+                   (cond
+                    ((symbol? form)
+                     (hash-ref id-map form form))
+                    ((and (pair? form) (eq? (car form) 'quote))
+                     form)
+                    ((pair? form)
+                     (cons (walk (car form)) (walk (cdr form))))
+                    (else form)))))
+    (map walk body)))
+
+;; 주어진 이름으로 새로운 빈 시스템을 생성합니다.
 (define (make-system . name)
   (make-system-record (if (null? name) #f (car name))
                       (make-cpnet-category '() '())
@@ -50,16 +66,19 @@
                       '()
                       '()))
 
+;; 부분 문자열을 기준으로 문자열을 분할합니다.
 (define (string-split-by-substring s sub)
   (if (string-null? sub)
       (error "string-split-by-substring: delimiter cannot be empty")
-      (let loop ((str s) (result '()))
-        (let ((pos (string-contains str sub)))
-          (if pos
-              (loop (substring str (+ pos (string-length sub)))
-                    (cons (substring str 0 pos) result))
-              (reverse (cons str result)))))))
+      (letrec ((loop (lambda (str result)
+                       (let ((pos (string-contains str sub)))
+                         (if pos
+                             (loop (substring str (+ pos (string-length sub)))
+                                   (cons (substring str 0 pos) result))
+                             (reverse (cons str result)))))))
+        (loop s '()))))
 
+;; 시스템에서 접두사에 해당하는 하위 시스템의 모든 구성요소(사상, 객체, cell 테이블)를 제거합니다.
 (define (system-remove-subsystem! system prefix-sym)
   (let* ((prefix-str (symbol->string prefix-sym))
          (net (system-get-net system))
@@ -83,6 +102,7 @@
          (hash-remove! tables key)))
      (hash-map->list (lambda (k v) k) tables))))
 
+;; 시스템에 객체(cell) 리스트를 추가합니다.
 (define (system-add-objects system . objects)
   (let ((net (system-get-net system))
         (obj-list (if (list? (car objects)) (car objects) objects)))
@@ -92,14 +112,17 @@
                 (cat:category-add-object net obj))
               obj-list)))
 
+;; 시스템에 사상(propagator) 리스트를 추가합니다.
 (define (system-add-morphisms system . morphisms)
   (let ((net (system-get-net system))
         (mor-list (if (list? (car morphisms)) (car morphisms) morphisms)))
     (for-each (lambda (mor) (cat:category-add-morphism net mor)) mor-list)))
 
+;; 시스템에 카테고리 이름과 cell 테이블을 매핑하여 추가합니다.
 (define (system-add-cell-table system cat-name table)
   (hash-set! (system-get-cell-tables system) cat-name table))
 
+;; 시스템 내에서 카테고리 이름과 cell 이름을 이용해 cell 객체를 찾습니다.
 (define (system-find-cell system cat-name cell-name)
   (let* ((tables (system-get-cell-tables system))
          (cat-table (hash-ref tables cat-name #f)))
@@ -108,165 +131,210 @@
         #f)))
 
 
-(define (system-add-propagator! system propagator)
-  (system-add-morphisms system propagator))
+;; 시스템 내에서 완전한 ID를 이용해 cell 객체를 찾습니다. 정확히 일치하는 ID가 없으면 고유한 접미사로 다시 찾습니다.
+(define (system-find-cell-by-id system cell-id)
+  (let* ((objects (cat:category-objects (system-get-net system)))
+         (exact-match (find (lambda (c) (eq? (core:cell-id c) cell-id)) objects)))
+    (if exact-match
+        exact-match
+        ;; Fallback to unique suffix match. This helps resolve partially-qualified
+        ;; names used as free variables inside propagator bodies.
+        (let* ((cell-id-str (symbol->string cell-id))
+               (candidates
+                (filter
+                 (lambda (c)
+                   (let ((fqn-str (symbol->string (core:cell-id c))))
+                     (and (string-suffix? cell-id-str fqn-str)
+                          (or (= (string-length fqn-str) (string-length cell-id-str))
+                              (eq? (string-ref fqn-str (- (string-length fqn-str) (string-length cell-id-str) 1)) #\.)))))
+                 objects)))
+          (if (= 1 (length candidates))
+              (car candidates)
+              #f)))))
 
-(define (system-get-category-table system cat-name)
-  (hash-ref (system-get-cell-tables system) cat-name #f))
 
-(define (system-find-propagator system cat-name prop-name)
-  (let* ((net (system-get-net system))
-         (mangled-id-str (if cat-name
-                             (format #f "~a.~a" cat-name prop-name)
-                             (symbol->string prop-name)))
-         (mangled-id (string->symbol mangled-id-str))
-         (prop (cat:category-find-morphism-by-id net mangled-id)))
-    (if prop
-        prop
-        (cat:category-find-morphism-by-suffix net prop-name))))
+  ;; 시스템에 propagator를 추가합니다. `system-add-morphisms`의 별칭입니다.
+  (define (system-add-propagator! system propagator)
+    (system-add-morphisms system propagator))
 
-(define (system-find-category-name-for-cat system cat)
-  (let* ((tables (system-get-cell-tables system))
-         (cat-objs (cat:category-objects cat))
-         (found-pair (find (lambda (pair)
-                             (let* ((cat-name (car pair))
-                                    (table (cdr pair))
-                                    (table-cells (hash-map->list (lambda (k v) v) table)))
-                               (if (null? cat-objs)
-                                   (null? table-cells)
-                                   (and (= (length cat-objs) (length table-cells))
-                                        (null? (lset-difference eq? cat-objs table-cells))))))
-                           (hash-map->list cons tables))))
-    (if found-pair
-        (car found-pair)
-        #f)))
+  ;; 시스템에서 카테고리 이름으로 cell 테이블을 가져옵니다.
+  (define (system-get-category-table system cat-name)
+    (hash-ref (system-get-cell-tables system) cat-name #f))
 
-(define (system-add-functor! system functor)
-  (system-set-functors! system (cons functor (system-functors system))))
+  ;; 시스템 내에서 propagator를 찾습니다. 완전한 ID 또는 고유한 접미사로 찾을 수 있습니다.
+  (define (system-find-propagator system cat-name prop-name)
+    (let* ((net (system-get-net system))
+           (mangled-id-str (if cat-name
+                               (format #f "~a.~a" cat-name prop-name)
+                               (symbol->string prop-name)))
+           (mangled-id (string->symbol mangled-id-str))
+           (prop (cat:category-find-morphism-by-id net mangled-id)))
+      (if prop
+          prop
+          (cat:category-find-morphism-by-suffix net prop-name))))
 
-(define (system-add-nt! system nt)
-  (system-set-nts! system (cons nt (system-nts system))))
+  ;; 카테고리 객체를 기반으로 시스템 내에서 해당 카테고리의 이름을 찾습니다.
+  (define (system-find-category-name-for-cat system cat)
+    (let* ((tables (system-get-cell-tables system))
+           (cat-objs (cat:category-objects cat))
+           (found-pair (find (lambda (pair)
+                               (let* ((cat-name (car pair))
+                                      (table (cdr pair))
+                                      (table-cells (hash-map->list (lambda (k v) v) table)))
+				 (if (null? cat-objs)
+                                     (null? table-cells)
+                                     (and (= (length cat-objs) (length table-cells))
+                                          (null? (lset-difference eq? cat-objs table-cells))))))
+                             (hash-map->list cons tables))))
+      (if found-pair
+          (car found-pair)
+          #f)))
 
-(define (make-propagator id src tgt fn . priority)
-  (let ((real-src (if (and (list? src) (= 1 (length src)) (not (core:cell? (car src)))) (car src) src))
-        (real-tgt (if (and (list? tgt) (= 1 (length tgt)) (not (core:cell? (car tgt)))) (car tgt) tgt)))
-    (apply cat:make-arrow id real-src real-tgt fn priority)))
+  ;; 시스템에 functor를 추가합니다.
+  (define (system-add-functor! system functor)
+    (system-set-functors! system (cons functor (system-functors system))))
 
-(define propagator? cat:arrow?)
+  ;; 시스템에 natural transformation(nt)을 추가합니다.
+  (define (system-add-nt! system nt)
+    (system-set-nts! system (cons nt (system-nts system))))
 
-(define (propagator-equal? p q)
-  (eq? (cat:arrow-id p) (cat:arrow-id q)))
+  ;; propagator(사상)를 생성합니다. `cat:make-arrow`의 래퍼 함수입니다.
+  (define (make-propagator id src tgt fn . priority)
+    (let ((real-src (if (and (list? src) (= 1 (length src))) (car src) src))
+          (real-tgt (if (and (list? tgt) (= 1 (length tgt))) (car tgt) tgt)))
+      (apply cat:make-arrow id real-src real-tgt fn priority)))
 
-(define (propagator-compose g f)
-  (unless (equal? (cat:arrow-cod f) (cat:arrow-dom g))
-    (error "Cannot compose: cod(f) ≠ dom(g)"))
-  (let* ((g-id-str (symbol->string (cat:arrow-id g)))
-         (f-id-str (symbol->string (cat:arrow-id f)))
-         (delim "_o_")
-         (g-parts (string-split-by-substring g-id-str delim))
-         (f-parts (string-split-by-substring f-id-str delim))
-         (name (string->symbol (string-join (append g-parts f-parts) delim)))
-         (compose-fn (lambda (x src-cell)
-                       (let* ((res-f ((cat:arrow-fn f) x src-cell))
-                              (val-y (car res-f))
-                              (effects-f (cdr res-f)))
-                         (if (eq? val-y core:*nothing*)
-                             (cons core:*nothing* effects-f)
-                             (let* ((res-g ((cat:arrow-fn g) val-y (cat:arrow-cod f)))
-                                    (val-z (car res-g))
-                                    (effects-g (cdr res-g)))
-                               (cons val-z (append effects-f effects-g))))))))
-    (let ((prio-f (cat:arrow-priority f))
-          (prio-g (cat:arrow-priority g)))
-      (make-propagator name (cat:arrow-dom f) (cat:arrow-cod g) compose-fn (max prio-f prio-g)))))
+  ;; 객체가 propagator인지 확인합니다.
+  (define propagator? cat:arrow?)
 
-(define (propagator-id-fn cell)
-  (let ((name (string->symbol
-               (string-append "id-" (symbol->string (core:cell-id cell))))))
-    ;; Give identity propagators a high priority so they are considered
-    ;; identities during composition validation before other propagators.
-    (make-propagator name cell cell (lambda (x _) (cons x '())) 100)))
+  ;; 두 propagator가 동일한지 ID를 기준으로 비교합니다.
+  (define (propagator-equal? p q)
+    (eq? (cat:arrow-id p) (cat:arrow-id q)))
 
-(define (make-cpnet-category objects morphisms)
-  (cat:make-category
-   cat:arrow-dom cat:arrow-cod
-   (lambda (g f) (propagator-compose g f))
-   propagator-id-fn
-   propagator-equal?
-   cat:arrow-id
-   objects
-   morphisms))
+  ;; 두 propagator를 합성합니다.
+  (define (propagator-compose g f)
+    (unless (equal? (cat:arrow-cod f) (cat:arrow-dom g))
+      (error "Cannot compose: cod(f) ≠ dom(g)"))
+    (let* ((g-id-str (symbol->string (cat:arrow-id g)))
+           (f-id-str (symbol->string (cat:arrow-id f)))
+           (delim "_o_")
+           (g-parts (string-split-by-substring g-id-str delim))
+           (f-parts (string-split-by-substring f-id-str delim))
+           (name (string->symbol (string-join (append g-parts f-parts) delim)))
+           (compose-fn (lambda (x src-cell)
+			 (let* ((res-f ((cat:arrow-fn f) x src-cell))
+				(val-y (car res-f))
+				(effects-f (cdr res-f)))
+                           (if (eq? val-y core:*nothing*)
+                               (cons core:*nothing* effects-f)
+                               (let* ((res-g ((cat:arrow-fn g) val-y (cat:arrow-cod f)))
+                                      (val-z (car res-g))
+                                      (effects-g (cdr res-g)))
+				 (cons val-z (append effects-f effects-g))))))))
+      (let ((prio-f (cat:arrow-priority f))
+            (prio-g (cat:arrow-priority g)))
+	(make-propagator name (cat:arrow-dom f) (cat:arrow-cod g) compose-fn (max prio-f prio-g)))))
 
-(define (make-cpnet-functor name src-cat tgt-cat cell-map)
-  (let* ((F0 (lambda (obj)
-	       (let ((pair (assoc obj cell-map)))
-		 (if pair
-		     (cdr pair)
-		     #f))))
-	 (F1 (lambda (p)
-	       (let* ((id (cat:arrow-id p))
-		      (id-str (symbol->string id)))
-		 (if (string-contains id-str "id-")
-		     (propagator-id-fn (F0 (cat:arrow-dom p)))
-		     (let ((new-dom (core:map-maybe F0 (cat:arrow-dom p)))
-			   (new-cod (core:map-maybe F0 (cat:arrow-cod p))))
-		       (make-propagator id new-dom new-cod (cat:arrow-fn p))))))))
-    (fun:make-functor-record name src-cat tgt-cat F0 F1)))
+  ;; 주어진 cell에 대한 항등 propagator를 생성합니다.
+  (define (propagator-id-fn cell)
+    (let ((name (string->symbol
+		 (string-append "id-" (symbol->string (core:cell-id cell))))))
+      ;; Give identity propagators a high priority so they are considered
+      ;; identities during composition validation before other propagators.
+      (make-propagator name cell cell (lambda (x _) (cons x '())) 100)))
 
-(define (make-branch-propagator id cond-cell then-cell else-cell result-cell)
-  (make-propagator
-   id
-   (list cond-cell then-cell else-cell)
-   result-cell
-   (lambda (vals _)
-     (let ((p? (list-ref vals 0))
-           (x  (list-ref vals 1))
-           (y  (list-ref vals 2)))
-       (cond
-        ((eq? p? #t) (cons x '()))
-        ((eq? p? #f) (cons y '()))
-        (else (cons core:*nothing* '())))))))
+  ;; CPNet에 특화된 카테고리를 생성합니다.
+  (define (make-cpnet-category objects morphisms)
+    (cat:make-category
+     cat:arrow-dom cat:arrow-cod
+     (lambda (g f) (propagator-compose g f))
+     propagator-id-fn
+     propagator-equal?
+     cat:arrow-id
+     objects
+     morphisms))
 
-(define (add-subsystem! target-system source-system-or-proc)
-  (let* ((source-system (if (procedure? source-system-or-proc)
-                            (source-system-or-proc)
-                            source-system-or-proc))
-         (source-prefix (system-name source-system))
-         (old->new-cell-map (make-hash-table)))
-    (when (not source-prefix)
-      (error "Cannot compose an unnamed system" source-system))
-    (let ((source-net (system-get-net source-system)))
-      (for-each
-       (lambda (old-cell)
-         (let* ((new-id (string->symbol (format #f "~a.~a" source-prefix (core:cell-id old-cell))))
-                (new-cell (core:make-cell new-id (core:cell-type old-cell) (core:cell-value old-cell) (core:cell-lattice-id old-cell))))
-           (hash-set! old->new-cell-map old-cell new-cell)))
-       (cat:category-objects source-net))
-      (system-add-objects target-system (hash-map->list (lambda (k v) v) old->new-cell-map)))
-    (let ((source-net (system-get-net source-system)))
-      (for-each
-       (lambda (old-mor)
-         (let* ((map-one (lambda (c) (hash-ref old->new-cell-map c #f)))
-                (old-dom (cat:arrow-dom old-mor))
-                (old-cod (cat:arrow-cod old-mor))
-                (new-dom (core:map-maybe map-one old-dom))
-                (new-cod (core:map-maybe map-one old-cod)))
-           (if (and new-dom (if (list? new-dom) (not (member #f new-dom)) #t)
-                    new-cod (if (list? new-cod) (not (member #f new-cod)) #t))
-               (let* ((old-fn (cat:arrow-fn old-mor))
-                      (new-mor-id (string->symbol (format #f "~a.~a" source-prefix (cat:arrow-id old-mor)))))
-                 (system-add-morphisms target-system (list (make-propagator new-mor-id new-dom new-cod old-fn (cat:arrow-priority old-mor)))))
-               (format (current-error-port) "Warning: could not map morphism ~a during subsystem merge.\n" (cat:arrow-id old-mor)))))
-       (cat:category-morphisms source-net)))
-    (hash-for-each
-     (lambda (cat-name table)
-       (let* ((mangled-cat-name (string->symbol (format #f "~a.~a" source-prefix cat-name)))
-              (new-table (make-hash-table)))
-         (hash-for-each
-          (lambda (cell-name old-cell)
-            (let ((new-cell (hash-ref old->new-cell-map old-cell)))
-              (hash-set! new-table cell-name new-cell)))
-          table)
-         (system-add-cell-table target-system mangled-cat-name new-table)))
-     (system-get-cell-tables source-system))))
+  ;; CPNet에 특화된 functor를 생성합니다.
+  (define (make-cpnet-functor name src-cat tgt-cat cell-map)
+    (let* ((F0 (lambda (obj)
+		 (let ((pair (assoc obj cell-map)))
+		   (if pair
+		       (cdr pair)
+		       #f))))
+	   (F1 (lambda (p)
+		 (let* ((id (cat:arrow-id p))
+			(id-str (symbol->string id)))
+		   (if (string-contains id-str "id-")
+		       (propagator-id-fn (F0 (cat:arrow-dom p)))
+		       (let ((new-dom (core:map-maybe F0 (cat:arrow-dom p)))
+			     (new-cod (core:map-maybe F0 (cat:arrow-cod p))))
+			 (make-propagator id new-dom new-cod (cat:arrow-fn p))))))))
+      (fun:make-functor-record name src-cat tgt-cat F0 F1)))
+
+  ;; 조건에 따라 두 값 중 하나를 선택하는 분기 propagator를 생성합니다.
+  (define (make-branch-propagator id cond-cell then-cell else-cell result-cell)
+    (make-propagator
+     id
+     (list cond-cell then-cell else-cell)
+     result-cell
+     (lambda (vals _)
+       (let ((p? (list-ref vals 0))
+             (x  (list-ref vals 1))
+             (y  (list-ref vals 2)))
+	 (cond
+          ((eq? p? #t) (cons x '()))
+          ((eq? p? #f) (cons y '()))
+          (else (cons core:*nothing* '())))))))
+
+  ;; 대상 시스템에 소스 시스템을 하위 시스템으로 추가(병합)합니다.
+  ;; 소스 시스템의 모든 cell과 propagator의 ID는 '시스템이름.' 접두사가 붙어 이름 충돌을 방지합니다.
+  (define (add-subsystem! target-system source-system-or-proc)
+    (let* ((source-system (if (procedure? source-system-or-proc)
+                              (source-system-or-proc)
+                              source-system-or-proc))
+           (source-prefix (system-name source-system))
+           (old->new-cell-map (make-hash-table))
+           (id-map (make-hash-table)))
+      (when (not source-prefix)
+	(error "Cannot compose an unnamed system" source-system))
+      (let ((source-net (system-get-net source-system)))
+	(for-each
+	 (lambda (old-cell)
+           (let* ((new-id (string->symbol (format #f "~a.~a" source-prefix (core:cell-id old-cell))))
+                  (new-cell (core:make-cell new-id (core:cell-type old-cell) (core:cell-value old-cell) (core:cell-lattice-id old-cell))))
+             (hash-set! old->new-cell-map old-cell new-cell)))
+	 (cat:category-objects source-net))
+	(system-add-objects target-system (hash-map->list (lambda (k v) v) old->new-cell-map)))
+      (hash-for-each
+       (lambda (old-cell new-cell)
+         (hash-set! id-map (core:cell-id old-cell) (core:cell-id new-cell)))
+       old->new-cell-map)
+      (let ((source-net (system-get-net source-system)))
+	(for-each
+	 (lambda (old-mor)
+           (let* ((map-one (lambda (c) (hash-ref old->new-cell-map c #f)))
+                  (old-dom (cat:arrow-dom old-mor))
+                  (old-cod (cat:arrow-cod old-mor))
+                  (new-dom (core:map-maybe map-one old-dom))
+                  (new-cod (core:map-maybe map-one old-cod)))
+             (if (and new-dom (if (list? new-dom) (not (member #f new-dom)) #t)
+                      new-cod (if (list? new-cod) (not (member #f new-cod)) #t))
+		 (let* ((old-fn (cat:arrow-fn old-mor))
+			(new-mor-id (string->symbol (format #f "~a.~a" source-prefix (cat:arrow-id old-mor))))
+                        (old-icnu-body (cat:arrow-icnu-body old-mor))
+                        (new-icnu-body (if old-icnu-body (substitute-symbols-in-body old-icnu-body id-map) #f)))
+                   (system-add-morphisms target-system (list (make-propagator new-mor-id new-dom new-cod old-fn (cat:arrow-priority old-mor) new-icnu-body))))
+		 (format (current-output-port) "Warning: could not map morphism ~a during subsystem merge.\n" (cat:arrow-id old-mor)))))
+	 (cat:category-morphisms source-net)))
+      (hash-for-each
+       (lambda (cat-name table)
+	 (let* ((mangled-cat-name (string->symbol (format #f "~a.~a" source-prefix cat-name)))
+		(new-table (make-hash-table)))
+           (hash-for-each
+            (lambda (cell-name old-cell)
+              (let ((new-cell (hash-ref old->new-cell-map old-cell)))
+		(hash-set! new-table cell-name new-cell)))
+            table)
+           (system-add-cell-table target-system mangled-cat-name new-table)))
+       (system-get-cell-tables source-system))))
 

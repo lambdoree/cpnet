@@ -8,6 +8,7 @@
   #:export (system->dot))
 
 ;; Helper to draw a single propagator with context-sensitive styling
+;; 단일 propagator(사상)를 문맥에 맞는 스타일로 그리는 헬퍼 함수입니다.
 (define (draw-propagator mor port nt-components-map indent)
   (let* ((dom (cat:arrow-dom mor))
          (cod (cat:arrow-cod mor))
@@ -53,14 +54,15 @@
              cod)
             (when cod (format port "~a\"~a\" -> \"~a\";\n" indent prop-node (core:cell-id cod))))))))
 
+;; 카테고리에 대한 클러스터를 그립니다. 클러스터에는 해당 카테고리의 cell과 내부 propagator들이 포함됩니다.
 (define (draw-category-cluster cat-name table port all-mors nt-components-map drawn-mors indent)
   (let* ((name-str (symbol->string cat-name))
          (parts (string-split name-str #\.))
          (short-cat-name (if (> (length parts) 1) (cadr parts) name-str)))
     (format port "~asubgraph \"cluster_~a\" {\n" indent cat-name)
     (format port "~a  label = \"~a\";\n" indent short-cat-name)
-    (format port "~a  style=filled;\n" indent)
-    (format port "~a  color=lightgrey;\n" indent)
+    (format port "~a  style=rounded;\n" indent)
+    (format port "~a  color=gray;\n" indent)
     ;; Draw cells
     (hash-for-each
      (lambda (cell-name cell)
@@ -84,6 +86,7 @@
        internal-mors))
     (format port "~a}\n" indent)))
 
+;; 전체 시스템 구조를 Graphviz DOT 언어 형식의 파일로 출력합니다.
 (define (system->dot system file-path)
   (let ((port (open-output-file file-path))
         (all-mors (cat:category-morphisms (system-get-net system)))
@@ -199,7 +202,7 @@
     (format port "      <tr><td align=\"right\">Cell</td><td>Rounded Box</td></tr>\n")
     (format port "      <tr><td align=\"right\">Propagator</td><td>Ellipse</td></tr>\n")
     (format port "      <tr><td align=\"right\">Category</td><td>Light-gray Box</td></tr>\n")
-    (format port "      <tr><td align=\"right\">System</td><td>Light-smoke Box</td></tr>\n")
+    (format port "      <tr><td align=\"right\">System</td><td>Gray Box</td></tr>\n")
     (format port "      <tr><td align=\"right\" port=\"i1\">Functor Impl.</td><td align=\"left\"><font color=\"blue\">Blue Ellipse (F: name)</font></td></tr>\n")
     (format port "      <tr><td align=\"right\" port=\"i2\">NT Component</td><td align=\"left\"><font color=\"red\">Red Ellipse (η: name)</font></td></tr>\n")
     (format port "    </table>\n")

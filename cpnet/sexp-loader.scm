@@ -2,11 +2,13 @@
   #:use-module (srfi srfi-1)
   #:use-module (cpnet core)
   #:use-module (cpnet dsl)
+  #:use-module (cpnet scenario)
   #:use-module (cpnet system)
   #:use-module (cpnet runtime)
   #:export (load-system-from-sexp
             load-system-from-file))
 
+;; `apply-gate`에 사용될 빌더의 인자 및 결과 개수(arity)가 올바른지 정적으로 확인합니다.
 (define (static-apply-arity-check builder arg-refs result-refs)
   (let* ((sig (builder-signature builder))
          (in-ports (cadr (assoc 'inputs sig)))
@@ -21,6 +23,7 @@
                      (length arg-refs)
                      (length result-refs))))))
 
+;; S-expression으로 표현된 값을 실제 Scheme 값으로 평가합니다. (예: `(quote foo)` -> `foo`)
 (define (eval-value-sexp sexp)
   (if (and (list? sexp) (> (length sexp) 0))
       (case (car sexp)
@@ -29,6 +32,7 @@
         (else sexp))
       sexp))
 
+;; S-expression으로부터 시스템 정의를 로드하고 시스템 객체를 생성합니다.
 (define (load-system-from-sexp sexp)
   (unless (and (list? sexp) (eq? (car sexp) 'system))
     (error "SEXP Loader: Expected format `(system <name> ...)`" sexp))
@@ -97,6 +101,7 @@
        clauses))
     sys))
 
+;; 파일 경로를 받아 해당 파일의 S-expression으로부터 시스템을 로드합니다.
 (define (load-system-from-file file-path)
   (call-with-input-file file-path
     (lambda (port)

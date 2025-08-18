@@ -7,6 +7,7 @@
             nt-tgt-functor
             nt-components))
 
+;; 자연 변환(Natural Transformation)을 나타내는 레코드 타입을 정의합니다.
 (define-record-type <nt>
   (make-nt-record name src-functor tgt-functor components)
   nt?

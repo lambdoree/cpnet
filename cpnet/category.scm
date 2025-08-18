@@ -32,6 +32,7 @@
 	    arrow-cod
 	    arrow-fn
 	    arrow-priority
+	    arrow-icnu-body
 	    ))
 
 (define-record-type <category>
@@ -47,31 +48,48 @@
   (mors _category-morphisms-h))
 
 (define-record-type <arrow>
-  (make-arrow-internal id dom cod fn priority)
+  (make-arrow-internal id dom cod fn priority icnu-body)
   arrow?
   (id arrow-id)
   (dom arrow-dom)
   (cod arrow-cod)
   (fn arrow-fn)
-  (priority arrow-priority))
+  (priority arrow-priority)
+  (icnu-body arrow-icnu-body))
 
-(define (make-arrow id dom cod fn . priority)
-  (make-arrow-internal id dom cod fn (if (null? priority) 0 (car priority))))
+;; 새로운 arrow(사상) 레코드를 생성합니다. 우선순위와 icnu-body는 선택적 인자입니다.
+(define (make-arrow id dom cod fn . args)
+  (let ((priority 0)
+        (icnu-body #f))
+    (when (pair? args)
+      (if (number? (car args))
+          (begin
+            (set! priority (car args))
+            (when (pair? (cdr args))
+              (set! icnu-body (cadr args))))
+          (set! icnu-body (car args))))
+    (make-arrow-internal id dom cod fn priority icnu-body)))
 
+;; 카테고리에 포함된 모든 객체(object)의 리스트를 반환합니다.
 (define (category-objects cat)
   (hash-map->list (lambda (k v) k) (_category-objects-h cat)))
+;; 카테고리에 포함된 모든 사상(morphism)의 리스트를 반환합니다.
 (define (category-morphisms cat)
   (hash-map->list (lambda (k v) v) (_category-morphisms-h cat)))
 
+;; 카테고리에 특정 객체가 포함되어 있는지 확인합니다.
 (define (category-has-object? cat obj)
   (hash-ref (_category-objects-h cat) obj #f))
 
+;; 카테고리에 특정 사상이 포함되어 있는지 확인합니다.
 (define (category-has-morphism? cat m)
   (hash-ref (_category-morphisms-h cat) ((category-mor-id-fn cat) m) #f))
 
+;; ID를 이용해 카테고리 내에서 사상을 찾습니다.
 (define (category-find-morphism-by-id cat mor-id)
   (hash-ref (_category-morphisms-h cat) mor-id #f))
 
+;; ID의 접미사를 이용해 카테고리 내에서 사상을 찾습니다. 모호한 경우 에러를 발생시킵니다.
 (define (category-find-morphism-by-suffix cat suffix-sym)
   (let* ((all-mors (category-morphisms cat))
          (suffix-str (symbol->string suffix-sym))
@@ -83,6 +101,7 @@
      ((= 1 (length found-mors)) (car found-mors))
      (else (error "ambiguous morphism suffix" suffix-sym)))))
 
+;; 객체와 사상 리스트를 받아 새로운 카테고리 레코드를 생성합니다.
 (define (make-category dom-fn cod-fn compose-fn id-fn equal-fn mor-id-fn obj-list mor-list)
   (let ((objs (make-hash-table))
         (mors (make-hash-table)))
@@ -90,6 +109,7 @@
     (for-each (lambda (m) (hash-set! mors (mor-id-fn m) m)) mor-list)
     (make-category-record dom-fn cod-fn compose-fn id-fn equal-fn mor-id-fn objs mors)))
 
+;; 카테고리에 객체를 추가합니다. 해당 객체에 대한 항등 사상(identity morphism)도 함께 추가합니다.
 (define (category-add-object cat obj)
   (let ((id-arrow ((category-id-fn cat) obj)))
     (unless (category-has-object? cat obj)
@@ -98,6 +118,7 @@
       (category-add-morphism cat id-arrow))
     cat))
 
+;; 카테고리에서 객체를 제거합니다. 해당 객체와 연결된 모든 사상도 함께 제거됩니다.
 (define (category-remove-object cat obj)
   (let ((objs (_category-objects-h cat))
         (morphs (_category-morphisms-h cat))
@@ -114,11 +135,13 @@
     (for-each (lambda (k) (hash-remove! morphs k)) mors-to-remove)
     cat))
 
+;; 카테고리에 사상을 추가합니다.
 (define (category-add-morphism cat arrow)
   (unless (category-has-morphism? cat arrow)
     (hash-set! (_category-morphisms-h cat) (arrow-id arrow) arrow))
   cat)
 
+;; 카테고리에서 사상을 제거합니다.
 (define (category-remove-morphism cat arrow)
   (let ((morphs (_category-morphisms-h cat))
         (mor-id-fn (category-mor-id-fn cat)))
@@ -126,6 +149,7 @@
       (hash-remove! morphs (mor-id-fn arrow)))
     cat))
 
+;; 두 사상 g와 f를 합성합니다(g ∘ f). `cod(f)`와 `dom(g)`가 일치해야 합니다.
 (define (category-compose cat g f)
   (let ((dom     (category-dom-fn     cat))
         (cod     (category-cod-fn     cat))
@@ -141,6 +165,7 @@
                   (comp-fn g f))))
         (error "category-compose: cod(f) is not equal to dom(g)" f g))))
 
+;; 카테고리가 항등원 법칙(unit law)과 결합 법칙(associativity law)을 만족하는지 검증합니다.
 (define (category-validate cat)
   (let* ((dom       (category-dom-fn cat))
          (cod       (category-cod-fn cat))
